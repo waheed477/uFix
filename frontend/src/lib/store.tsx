@@ -98,6 +98,7 @@ export interface Loc {
 export type Screen =
   | "newRequest"
   | "offers"
+  | "availableProviders"
   | "activeJob"
   | "chat"
   | "rating"
@@ -920,10 +921,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setJobs(prev => [frontendJob, ...prev]);
       setActiveRequestId(frontendJob.id);
       persistActiveRequestId(frontendJob.id); // Persist for refresh survival
-      setStack(['offers']);
+      setStack(['availableProviders']); // NEW: Direct discovery model - show available providers with price from profile, not offers wait
       
-      showToast('Request posted, finding nearby pros...', 'check');
-      console.log(`[postRequest] Created request ${frontendJob.id}, set as active, navigating to offers`);
+      showToast(`Request posted in ${location.city || user?.city || 'your city'}! Finding ${category} pros...`, 'check');
+      console.log(`[postRequest] Created request ${frontendJob.id} in city ${location.city}, navigating to availableProviders`);
     } catch (err: any) {
       console.error('Post request failed', err);
       showToast(err.message || 'Failed to post request', 'info');

@@ -253,6 +253,12 @@ export const api = {
       apiFetch(`/api/requests/${id}/cancel`, {
         method: 'PATCH',
       }),
+    // NEW: Direct accept - customer directly books provider with price from profile (provider discovery model)
+    directAccept: (requestId: string, providerId: string) =>
+      apiFetch(`/api/requests/${requestId}/direct-accept`, {
+        method: 'POST',
+        body: JSON.stringify({ providerId }),
+      }),
   },
 
   // Offers

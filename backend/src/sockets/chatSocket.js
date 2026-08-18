@@ -218,6 +218,81 @@ const registerChatHandlers = (io, socket) => {
       }
     }
   });
+
+  // ==================== LIVE LOCATION SHARING FOR ACTIVE JOB ====================
+  // Both customer and provider can see each other's live location during active job
+  // Like inDrive: customer sees provider moving towards them
+  socket.on('job:locationUpdate', async (payload, callback) => {
+    try {
+      const { jobId, lat, lng, heading, speed, accuracy } = payload || {};
+
+      if (!jobId || lat === undefined || lng === undefined) {
+        const err = { message: 'jobId, lat, lng required', code: 'MISSING_FIELDS' };
+        if (typeof callback === 'function') callback({ status: 'error', error: err });
+        return;
+      }
+
+      const parsedLat = Number(lat);
+      const parsedLng = Number(lng);
+      if (isNaN(parsedLat) || isNaN(parsedLng) || parsedLat < -90 || parsedLat > 90 || parsedLng < -180 || parsedLng > 180) {
+        const err = { message: 'Invalid lat/lng', code: 'INVALID_COORDS' };
+        if (typeof callback === 'function') callback({ status: 'error', error: err });
+        return;
+      }
+
+      const job = await Job.findById(jobId);
+      if (!job) {
+        const err = { message: 'Job not found', code: 'JOB_NOT_FOUND' };
+        if (typeof callback === 'function') callback({ status: 'error', error: err });
+        return;
+      }
+
+      const isCustomer = job.customer.toString() === userId;
+      const isProvider = job.provider.toString() === userId;
+      if (!isCustomer && !isProvider) {
+        const err = { message: 'Not participant', code: 'NOT_PARTICIPANT' };
+        if (typeof callback === 'function') callback({ status: 'error', error: err });
+        return;
+      }
+
+      // Don't allow location updates for completed/cancelled jobs
+      if (job.status === 'completed') {
+        if (typeof callback === 'function') callback({ status: 'error', error: { message: 'Job completed, no more location updates', code: 'JOB_COMPLETED' } });
+        return;
+      }
+
+      const otherParticipantId = isCustomer ? job.provider.toString() : job.customer.toString();
+      const locationPayload = {
+        jobId,
+        userId,
+        role: userRole,
+        lat: parsedLat,
+        lng: parsedLng,
+        heading: heading || null,
+        speed: speed || null,
+        accuracy: accuracy || null,
+        timestamp: Date.now(),
+        isCustomer,
+        isProvider
+      };
+
+      // Emit to other participant (customer sees provider live, provider sees customer live)
+      io.to(`user:${otherParticipantId}`).emit('job:locationUpdate', locationPayload);
+      // Also emit to self for confirmation (optional)
+      // io.to(`user:${userId}`).emit('job:locationUpdate', { ...locationPayload, isSelf: true });
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`📍 job:locationUpdate - job ${jobId} ${userRole} ${userId} -> user:${otherParticipantId} at [${parsedLng},${parsedLat}]`);
+      }
+
+      if (typeof callback === 'function') {
+        callback({ status: 'success', message: 'Location shared' });
+      }
+    } catch (error) {
+      console.error('job:locationUpdate error:', error);
+      if (typeof callback === 'function') callback({ status: 'error', error: { message: 'Failed to update location' } });
+    }
+  });
 };
 
 module.exports = {

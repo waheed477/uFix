@@ -2,7 +2,7 @@ import { cn } from "@/utils/cn";
 import { AppProvider, useApp } from "@/lib/store";
 import type { ChatMessage, Job, Role } from "@/lib/types";
 import { AuthScreen, ProviderSetupScreen, SplashScreen } from "@/screens/onboarding";
-import { CustomerHome, NewRequest, OffersScreen } from "@/screens/customer";
+import { CustomerHome, NewRequest, OffersScreen, AvailableProvidersScreen } from "@/screens/customer";
 import { ProviderHome } from "@/screens/provider";
 import { ActiveJobScreen, ChatScreen, HistoryScreen, JobsTab, RatingScreen } from "@/screens/jobs";
 import { EditProfileScreen, ProfileTab } from "@/screens/profile";
@@ -131,7 +131,6 @@ function AppShell() {
   const unread = conversationList(jobs, messages, user?.role).reduce((s, c) => s + c.unread, 0);
 
   const renderScreen = () => {
-    // Provider should not have request creation option - only customer demand
     if (screen === "newRequest" && isProvider) {
       return <ProviderHome />;
     }
@@ -140,6 +139,8 @@ function AppShell() {
         return <NewRequest />;
       case "offers":
         return <OffersScreen />;
+      case "availableProviders":
+        return <AvailableProvidersScreen />;
       case "activeJob":
         return <ActiveJobScreen />;
       case "chat":

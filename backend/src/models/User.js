@@ -99,6 +99,14 @@ const userSchema = new mongoose.Schema({
     max: [50, 'Experience seems too high'],
     // Providers only
   },
+  defaultVisitingCharge: {
+    type: Number,
+    min: [100, 'Visiting charge must be at least Rs 100'],
+    max: [5000, 'Visiting charge cannot exceed Rs 5000'],
+    default: 500,
+    // Provider's default price set during profile setup, shown to customers in available providers list
+    // Customer sees this price when browsing online providers in same city, can directly book
+  },
   documentUrl: {
     type: String,
     // Verification document URL (image or PDF) - providers only

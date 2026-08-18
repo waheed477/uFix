@@ -17,6 +17,7 @@ import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
 import { categoryById, type Job, type JobStatus } from "@/lib/types";
 import { MapView } from "@/components/MapView";
+import { GoogleMapView } from "@/components/GoogleMap";
 import {
   Avatar,
   BriefcaseIcon,
@@ -39,7 +40,8 @@ import {
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { adaptBackendJobToFrontendJob } from "@/lib/adapters";
-import { DEFAULT_COORDS } from "@/lib/location";
+import { DEFAULT_COORDS, calculateDistanceKm, watchPosition, clearWatch, isGoogleMapsAvailable, type Coords } from "@/lib/location";
+import { socketClient } from "@/lib/socket";
 
 /* ---------------- status helpers ---------------- */
 

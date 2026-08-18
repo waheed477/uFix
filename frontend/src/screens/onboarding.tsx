@@ -551,12 +551,13 @@ export function ProviderSetupScreen() {
   const [category, setCategory] = useState<Category | null>(null);
   const [radius, setRadius] = useState(8);
   const [experience, setExperience] = useState("4–7");
+  const [price, setPrice] = useState(500);
   const [doc, setDoc] = useState(false);
   const [docFile, setDocFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const steps = ["Category", "Coverage", "Verification"];
+  const steps = ["Category", "Coverage", "Price & Verification"];
 
   const next = () => {
     if (step === 0 && !category) return;
@@ -568,20 +569,16 @@ export function ProviderSetupScreen() {
     setBusy(true);
     setError(null);
     try {
-      // Map experience string to number
       const expMap: Record<string, number> = { "1–3": 2, "4–7": 5, "8+": 10 };
       const yearsExperience = expMap[experience] || 5;
 
-      // Call real API for provider setup
-      await api.providers.setup({ category, radiusKm: radius, yearsExperience });
+      await api.providers.setup({ category, radiusKm: radius, yearsExperience, defaultVisitingCharge: price } as any);
 
-      // Upload document if selected
       if (docFile) {
         try {
           await api.providers.uploadDocument(docFile);
         } catch (uploadErr: any) {
           console.warn('Document upload failed, but setup completed', uploadErr);
-          // Don't fail entire setup if doc upload fails
         }
       }
 
@@ -664,8 +661,8 @@ export function ProviderSetupScreen() {
         {step === 1 && (
           <div className="animate-slide-up space-y-6">
             <div>
-              <h2 className="font-display text-xl font-bold text-ink-900">Service radius</h2>
-              <p className="mt-1 text-sm text-ink-500">How far are you willing to travel for a job?</p>
+              <h2 className="font-display text-xl font-bold text-ink-900">Service radius & Price</h2>
+              <p className="mt-1 text-sm text-ink-500">Set your coverage and your default visiting charge (customers will see this price).</p>
             </div>
 
             <div className="rounded-2xl border border-ink-100 bg-ink-50 p-5">
@@ -673,17 +670,22 @@ export function ProviderSetupScreen() {
                 <span className="text-sm font-medium text-ink-500">Coverage area</span>
                 <span className="font-display text-3xl font-bold text-brand-600">{radius} km</span>
               </div>
-              <input
-                type="range"
-                min={2}
-                max={25}
-                value={radius}
-                onChange={(e) => setRadius(+e.target.value)}
-                className="w-full accent-brand-600"
-              />
-              <div className="mt-1 flex justify-between text-[11px] font-medium text-ink-400">
-                <span>2 km</span>
-                <span>25 km</span>
+              <input type="range" min={2} max={25} value={radius} onChange={(e) => setRadius(+e.target.value)} className="w-full accent-brand-600" />
+              <div className="mt-1 flex justify-between text-[11px] font-medium text-ink-400"><span>2 km</span><span>25 km</span></div>
+            </div>
+
+            <div className="rounded-2xl border-2 border-accent-200 bg-accent-50 p-5">
+              <div className="mb-2 flex items-end justify-between">
+                <span className="text-sm font-bold text-ink-800">Default Visiting Charge (Your Price)</span>
+                <span className="font-display text-3xl font-bold text-accent-600">₹{price}</span>
+              </div>
+              <p className="mb-3 text-xs text-ink-500">This price will be shown to customers in {`your city`} when they browse online {category || 'plumbers'}. Customer will directly book you at this price.</p>
+              <input type="range" min={100} max={2000} step={50} value={price} onChange={(e) => setPrice(+e.target.value)} className="w-full accent-accent-500" />
+              <div className="mt-1 flex justify-between text-[11px] font-medium text-ink-400"><span>Rs 100</span><span>Rs 2000</span></div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[300,500,750,1000,1500].map(p=>(
+                  <button key={p} onClick={()=>setPrice(p)} className={cn("rounded-full border px-3 py-1 text-xs font-semibold", price===p ? "border-accent-500 bg-accent-500 text-white" : "border-ink-200 bg-white text-ink-500")}>₹{p}</button>
+                ))}
               </div>
             </div>
 
@@ -691,16 +693,7 @@ export function ProviderSetupScreen() {
               <h3 className="mb-2 text-sm font-semibold text-ink-700">Years of experience</h3>
               <div className="flex gap-2">
                 {["1–3", "4–7", "8+"].map((e) => (
-                  <button
-                    key={e}
-                    onClick={() => setExperience(e)}
-                    className={cn(
-                      "flex-1 rounded-xl border-2 py-3 text-sm font-semibold transition-all",
-                      experience === e ? "border-brand-500 bg-brand-50 text-brand-700" : "border-ink-200 text-ink-500"
-                    )}
-                  >
-                    {e} yrs
-                  </button>
+                  <button key={e} onClick={() => setExperience(e)} className={cn("flex-1 rounded-xl border-2 py-3 text-sm font-semibold", experience === e ? "border-brand-500 bg-brand-50 text-brand-700" : "border-ink-200 text-ink-500")}>{e} yrs</button>
                 ))}
               </div>
             </div>

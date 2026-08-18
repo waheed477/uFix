@@ -41,6 +41,10 @@ router.get('/:id/offers', offerController.getOffersForRequest);
 // Get single request - any auth but controller checks ownership/offered
 router.get('/:id', requestController.getRequestById);
 
+// Direct accept - customer directly books a provider with price from profile (new provider discovery model)
+// POST /api/requests/:id/direct-accept {providerId} - customer directly accepts specific provider without waiting for offers
+router.post('/:id/direct-accept', roleCheck('customer'), requestController.directAccept);
+
 // Cancel request - customer only
 router.patch('/:id/cancel', roleCheck('customer'), requestController.cancelRequest);
 

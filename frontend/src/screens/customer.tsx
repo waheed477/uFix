@@ -349,3 +349,136 @@ export function OffersScreen() {
     </div>
   );
 }
+
+export function AvailableProvidersScreen() {
+  const { back, jobs, activeRequestId, location, draftCategory, isLoading } = useApp();
+  const [providers, setProviders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [bookingId, setBookingId] = useState<string | null>(null);
+
+  const request = useMemo(() => {
+    if (activeRequestId) return jobs.find((j) => j.id === activeRequestId);
+    const openRequests = jobs.filter((j: any) => j._originalStatus === 'pending' || j.status === 'open').sort((a,b)=>b.createdAt-a.createdAt);
+    return openRequests[0];
+  }, [jobs, activeRequestId]);
+
+  const effectiveRequestId = request?.id || activeRequestId;
+
+  const fetchAvailable = async () => {
+    try {
+      setLoading(true);
+      const city = location.city || "";
+      const category = request?.category || draftCategory;
+      if (!city) { setLoading(false); return; }
+      const data = await api.providers.available({ city, category });
+      setProviders(data.providers || []);
+      console.log(`[AvailableProviders] ${data.count} online ${category} in ${city}`);
+    } catch (e) {
+      console.error('Failed to fetch available providers', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchAvailable(); const iv = setInterval(fetchAvailable, 5000); return () => clearInterval(iv); }, [location.city, draftCategory, effectiveRequestId]);
+
+  const handleBook = async (provider: any) => {
+    if (!effectiveRequestId) return;
+    try {
+      setBookingId(provider.id);
+      const res = await api.requests.directAccept(effectiveRequestId, provider.id);
+      console.log('[AvailableProviders] Direct accept success', res);
+      // The store's refreshJobs and socket offer:accepted will handle navigation to activeJob
+      // For now, show toast and rely on store's offer:accepted handler to navigate
+      // We can also manually navigate after small delay
+      window.dispatchEvent(new CustomEvent('ufix:booked', { detail: { providerId: provider.id } }));
+    } catch (err: any) {
+      console.error('Direct booking failed', err);
+      alert(err.message || 'Failed to book provider');
+    } finally {
+      setBookingId(null);
+    }
+  };
+
+  if (!request) {
+    return (
+      <div className="flex h-full flex-col bg-ink-50">
+        <header className="flex items-center gap-3 bg-white px-4 py-3.5 shadow-sm">
+          <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
+          <h1 className="font-display text-lg font-bold text-ink-900">Available Providers</h1>
+        </header>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <p className="text-sm font-medium text-ink-500">No active request in {location.city}</p>
+          <Button size="sm" onClick={back}>Go Home</Button>
+        </div>
+      </div>
+    );
+  }
+
+  const meta = categoryById(request.category as any);
+
+  return (
+    <div className="flex h-full flex-col bg-ink-50">
+      <header className="bg-white px-4 py-3.5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
+          <div className="flex-1">
+            <h1 className="font-display text-lg font-bold text-ink-900">Providers in {location.city}</h1>
+            <p className="text-xs text-ink-500">{providers.length} {request.category} online • Direct booking with price from profile</p>
+          </div>
+          <CategoryIcon category={request.category as any} size={38} />
+        </div>
+        <div className="mt-3 rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+          <p className="text-sm font-semibold text-emerald-800">📍 {request.address} • {location.city}</p>
+          <p className="mt-1 text-xs text-emerald-600">Showing only online verified {request.category} providers in {location.city} with their profile price. No need to wait for offers - book directly!</p>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {loading ? (
+          <div className="space-y-3">
+            {[0,1,2].map(i=><div key={i} className="rounded-2xl bg-white p-4 shadow-card animate-pulse"><Skeleton className="h-12 w-full" /></div>)}
+          </div>
+        ) : providers.length === 0 ? (
+          <EmptyState icon={<ClockIcon className="h-9 w-9" />} title={`No ${request.category} online in ${location.city}`} subtitle={`No ${request.category} providers online in ${location.city} right now. Try refreshing or wait for offers via old flow.`} />
+        ) : (
+          <div className="space-y-3">
+            {providers.map((p: any, idx: number) => (
+              <div key={p.id} className="animate-slide-in-right rounded-2xl bg-white p-4 shadow-card" style={{ animationDelay: `${idx*60}ms` }}>
+                <div className="flex items-center gap-3">
+                  <Avatar initials={p.name?.split(' ').map((x:string)=>x[0]).slice(0,2).join('').toUpperCase() || 'P'} color={p.name ? `hsl(${p.name.length*40},70%,40%)` : '#167a6c'} size={46} online />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5"><span className="truncate font-display text-[15px] font-bold text-ink-900">{p.name}</span><ShieldIcon className="h-4 w-4 shrink-0 text-brand-600" /></div>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-500">
+                      <span className="font-semibold" style={{ color: meta.color }}>{p.category}</span>
+                      <span className="text-ink-300">·</span><span>{p.city}</span>
+                      <span className="text-ink-300">·</span><Stars value={p.rating || 4.8} size={12} /><span className="font-semibold">{p.rating || 4.8}</span>
+                    </div>
+                  </div>
+                  <div className="text-right"><p className="text-[11px] font-medium text-ink-400">Price</p><p className="font-display text-2xl font-extrabold text-accent-600">₹{p.defaultVisitingCharge || 500}</p></div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><MapPinIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">{p.city} • Online</span></div>
+                  <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><ClockIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">{p.yearsExperience || 5} yrs exp</span></div>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" className="flex-1" onClick={()=>handleBook(p)} disabled={!!bookingId}>
+                    {bookingId===p.id ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : `Book Now - ₹${p.defaultVisitingCharge || 500}`}
+                  </Button>
+                </div>
+                <p className="mt-2 text-center text-[10px] text-ink-400">Direct booking with price from provider profile • No offer wait needed • Same city {location.city} only</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-ink-100 bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-ink-500">Showing only online verified {request.category} in {location.city} • Category filter: {request.category} only as requested</p>
+          <button onClick={fetchAvailable} className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-card">Refresh</button>
+        </div>
+      </div>
+    </div>
+  );
+}

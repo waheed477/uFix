@@ -186,6 +186,11 @@ function markChatRead(jobId: string, ack?: (res: any) => void) {
   emit('chat:markRead', { jobId }, ack);
 }
 
+// Live location sharing for active job - both customer and provider see each other's live location
+function sendLocationUpdate(jobId: string, lat: number, lng: number, extra?: { heading?: number; speed?: number; accuracy?: number | null }, ack?: (res: any) => void) {
+  emit('job:locationUpdate', { jobId, lat, lng, ...extra }, ack);
+}
+
 // Helper to re-authenticate socket after token refresh
 function reconnectWithNewToken() {
   disconnectSocket();
@@ -205,6 +210,7 @@ export const socketClient = {
   emit,
   sendChatMessage,
   markChatRead,
+  sendLocationUpdate,
   reconnectWithNewToken,
   getUrl: () => SOCKET_URL,
 };
