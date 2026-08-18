@@ -911,6 +911,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         lng: latLng.lng,
         lat: latLng.lat,
         address,
+        city: location.city || user?.city || undefined,
       });
 
       const backendRequest = response.request;

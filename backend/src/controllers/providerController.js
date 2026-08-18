@@ -315,6 +315,70 @@ const verifyProvider = async (req, res) => {
 };
 
 /**
+ * @route GET /api/providers/available
+ * @desc Get count and list of available online providers by city and category (for customer)
+ * @query city, category
+ * @access Private (customer or provider)
+ * 
+ * This enables: "Jo city customer select karta hai, usko usi city ke online available providers dikhne chahiye"
+ * City-based filtering, precise location ignore as per user request
+ */
+const getAvailableProviders = async (req, res) => {
+  try {
+    const { city, category } = req.query;
+
+    const filter = {
+      role: 'provider',
+      isOnline: true,
+      isVerified: true,
+    };
+
+    if (category) {
+      const valid = ['plumber', 'electrician', 'mechanic'];
+      if (!valid.includes(category)) {
+        return res.status(400).json({ status: 'error', message: `Invalid category. Must be one of: ${valid.join(', ')}` });
+      }
+      filter.category = category;
+    }
+
+    if (city) {
+      filter.city = { $regex: new RegExp(`^${city}$`, 'i') };
+    }
+
+    const count = await User.countDocuments(filter);
+    const providers = await User.find(filter)
+      .select('name category city rating reviews profilePicture isOnline')
+      .limit(20)
+      .lean();
+
+    return res.status(200).json({
+      status: 'success',
+      city: city || 'all',
+      category: category || 'all',
+      count,
+      providers: providers.map(p => ({
+        id: p._id,
+        name: p.name,
+        category: p.category,
+        city: p.city,
+        rating: p.rating,
+        reviews: p.reviews,
+        profilePicture: p.profilePicture,
+        isOnline: p.isOnline
+      })),
+      message: city ? `${count} online ${category||'providers'} available in ${city}` : `${count} online providers available`
+    });
+  } catch (error) {
+    console.error('GetAvailableProviders error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to get available providers',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
+/**
  * @route POST /api/providers/dev/verify-me
  * @desc DEV ONLY - Auto-verify current provider (no admin secret needed in dev)
  * @access Private - provider role, only when NODE_ENV !== production
@@ -375,5 +439,6 @@ module.exports = {
   uploadDocument,
   getVerificationStatus,
   verifyProvider,
+  getAvailableProviders,
   devAutoVerify
 };

@@ -61,6 +61,13 @@ const requestSchema = new mongoose.Schema({
     maxlength: [300, 'Address cannot exceed 300 characters'],
     // Human-readable for display only, not used in geo queries
   },
+  city: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'City cannot exceed 100 characters'],
+    // City-based filtering: when customer posts request, store city so providers of same city see it
+    // This allows precise location ignore and city-based matching as per user request
+  },
   status: {
     type: String,
     enum: {

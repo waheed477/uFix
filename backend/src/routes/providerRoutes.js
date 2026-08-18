@@ -25,6 +25,10 @@ router.post('/document', auth, roleCheck('provider'), uploadVerificationDocument
 // Verification status - provider only
 router.get('/verification-status', auth, roleCheck('provider'), providerController.getVerificationStatus);
 
+// NEW: Available providers by city (for customer) - city-based filtering
+// GET /api/providers/available?city=Lahore&category=plumber
+router.get('/available', auth, providerController.getAvailableProviders);
+
 // DEV ONLY auto-verify - no admin secret needed, for local testing ease
 // POST /api/providers/dev/verify-me - auto-verifies current provider in dev mode
 router.post('/dev/verify-me', auth, roleCheck('provider'), providerController.devAutoVerify);

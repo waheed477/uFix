@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
 import { categoryById } from "@/lib/types";
@@ -16,6 +16,8 @@ import {
   Stars,
   WalletIcon,
 } from "@/components/ui";
+import { api } from "@/lib/api";
+import { getCityByName } from "@/lib/location";
 
 function MenuItem({
   icon,
@@ -35,12 +37,7 @@ function MenuItem({
       onClick={onClick}
       className="tap-highlight-none flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-ink-50 active:bg-ink-100"
     >
-      <span
-        className={cn(
-          "flex h-10 w-10 items-center justify-center rounded-xl",
-          danger ? "bg-rose-50 text-rose-500" : "bg-ink-100 text-ink-600"
-        )}
-      >
+      <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl", danger ? "bg-rose-50 text-rose-500" : "bg-ink-100 text-ink-600")}>
         {icon}
       </span>
       <span className={cn("flex-1 text-[15px] font-semibold", danger ? "text-rose-600" : "text-ink-800")}>{label}</span>
@@ -51,20 +48,52 @@ function MenuItem({
 }
 
 export function ProfileTab() {
-  const { user, navigate, logout, jobs } = useApp();
-  if (!user) return null;
+  const { user, navigate, logout, jobs, location } = useApp();
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [fullProfile, setFullProfile] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        setProfileLoading(true);
+        const data = await api.users.getProfile();
+        setFullProfile(data.user);
+      } catch (e) {
+        console.warn('Failed to fetch full profile', e);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+    fetchProfile();
+  }, []);
+
+  if (!user) {
+    return (
+      <div className="flex h-full items-center justify-center bg-ink-50">
+        <div className="flex flex-col items-center gap-3">
+          <span className="h-8 w-8 animate-spin rounded-full border-2 border-ink-200 border-t-brand-600" />
+          <p className="text-sm text-ink-500">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
+
   const isProvider = user.role === "provider";
   const meta = user.category ? categoryById(user.category) : null;
   const completed = jobs.filter((j) => j.status === "completed").length;
+  const displayCity = fullProfile?.city || user.city || location.city || "Not set";
+  const cityInfo = getCityByName(displayCity);
 
   return (
     <div className="h-full overflow-y-auto bg-ink-50">
       <header className="px-4 pb-3 pt-4">
-        <h1 className="font-display text-xl font-bold text-ink-900">Profile</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="font-display text-xl font-bold text-ink-900">Profile</h1>
+          {profileLoading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-200 border-t-brand-600" />}
+        </div>
       </header>
 
       <div className="space-y-4 px-4 pb-6">
-        {/* hero card */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800 p-5 text-white shadow-float">
           <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
           <div className="relative flex items-center gap-4">
@@ -72,20 +101,16 @@ export function ProfileTab() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="truncate font-display text-lg font-bold">{user.name}</h2>
-                {user.verified && <ShieldIcon className="h-4 w-4 shrink-0 text-accent-300" />}
+                {(user.verified || fullProfile?.isVerified) && <ShieldIcon className="h-4 w-4 shrink-0 text-accent-300" />}
               </div>
-              <p className="text-sm text-white/70">
-                {user.phone}
-                {user.city ? ` · ${user.city}` : ""}
+              <p className="text-sm text-white/70">{user.phone}</p>
+              <p className="mt-0.5 flex items-center gap-1 text-xs text-white/60">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent-300" />
+                {displayCity} {cityInfo ? `· ${cityInfo.province}` : ''} {fullProfile?.isVerified ? '· Verified ✓' : isProvider ? '· Pending' : ''}
               </p>
-              <span
-                className={cn(
-                  "mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold",
-                  isProvider ? "bg-white/15 text-white" : "bg-accent-400 text-ink-950"
-                )}
-              >
+              <span className={cn("mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold", isProvider ? "bg-white/15 text-white" : "bg-accent-400 text-ink-950")}>
                 {isProvider && meta && <CategoryIcon category={meta.id} size={16} className="rounded" />}
-                {isProvider ? meta?.label ?? "Provider" : "Customer"}
+                {isProvider ? meta?.label ?? "Provider" : "Customer"} · {displayCity}
               </span>
             </div>
           </div>
@@ -104,21 +129,46 @@ export function ProfileTab() {
           </div>
         </div>
 
+        <div className="rounded-2xl bg-white p-4 shadow-card">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-ink-900">📍 Your City & Area</h3>
+            <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">{displayCity}</span>
+          </div>
+          <div className="mt-3 space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-ink-500">City:</span>
+              <span className="font-semibold text-ink-900">{displayCity}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ink-500">Map Center:</span>
+              <span className="text-xs font-medium text-ink-700">{location.city} · {location.address.substring(0,28)}...</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ink-500">Mode:</span>
+              <span className="text-xs font-medium text-emerald-600">City-based (precise location ignored)</span>
+            </div>
+            <p className="pt-2 text-[11px] leading-relaxed text-ink-400">
+              {isProvider
+                ? `You see requests only from ${displayCity}. Customer in ${displayCity} → you get LIVE notification.`
+                : `You see online ${displayCity} providers only. Requests go to ${displayCity} pros.`}
+            </p>
+          </div>
+        </div>
+
         {isProvider && meta && (
           <div className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-card">
             <CategoryIcon category={meta.id} size={44} />
             <div className="flex-1">
               <p className="font-display text-sm font-bold text-ink-900">{meta.label}</p>
-              <p className="text-xs text-ink-500">{meta.tagline}</p>
+              <p className="text-xs text-ink-500">{meta.tagline} · {displayCity}</p>
             </div>
             <div className="text-right">
               <p className="font-display text-sm font-bold text-ink-900">{user.radiusKm} km</p>
-              <p className="text-[11px] text-ink-400">Service radius</p>
+              <p className="text-[11px] text-ink-400">Radius</p>
             </div>
           </div>
         )}
 
-        {/* menu */}
         <div className="overflow-hidden rounded-2xl bg-white shadow-card">
           <MenuItem icon={<EditIcon className="h-5 w-5" />} label="Edit profile" onClick={() => navigate("editProfile")} />
           <div className="h-px bg-ink-100" />
@@ -133,14 +183,11 @@ export function ProfileTab() {
           <MenuItem icon={<GearIcon className="h-5 w-5" />} label="Settings" onClick={() => {}} />
         </div>
 
-        <button
-          onClick={logout}
-          className="tap-highlight-none flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 font-semibold text-rose-500 shadow-card transition-transform active:scale-[0.99]"
-        >
+        <button onClick={logout} className="tap-highlight-none flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 font-semibold text-rose-500 shadow-card">
           <LogoutIcon className="h-5 w-5" /> Log out
         </button>
 
-        <p className="pb-2 text-center text-[11px] text-ink-400">uFix · v1.0 · Made with care</p>
+        <p className="pb-2 text-center text-[11px] text-ink-400">uFix · v1.0 · {displayCity} · 35 Pakistan cities · Made with care</p>
       </div>
     </div>
   );
@@ -173,22 +220,12 @@ export function EditProfileScreen() {
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-ink-700">Full name</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="h-14 w-full rounded-2xl border-2 border-ink-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500"
-            />
+            <input value={name} onChange={(e) => setName(e.target.value)} className="h-14 w-full rounded-2xl border-2 border-ink-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500" />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-ink-700">Phone number</label>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              inputMode="tel"
-              className="h-14 w-full rounded-2xl border-2 border-ink-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500"
-            />
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" className="h-14 w-full rounded-2xl border-2 border-ink-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500" />
           </div>
-
           {isProvider && meta && (
             <div className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white p-4">
               <CategoryIcon category={meta.id} size={44} soft />

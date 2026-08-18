@@ -224,6 +224,11 @@ export const api = {
       });
     },
     verificationStatus: () => apiFetch('/api/providers/verification-status'),
+    // NEW: Available providers by city - for customer to see online providers in same city
+    available: (params?: { city?: string; category?: string }) =>
+      apiFetch('/api/providers/available', {
+        params: params as any,
+      }),
     // DEV ONLY - auto-verify current provider for local testing (no admin secret needed)
     devAutoVerify: () =>
       apiFetch('/api/providers/dev/verify-me', {
@@ -233,7 +238,7 @@ export const api = {
 
   // Requests
   requests: {
-    create: (data: { category: string; description: string; lng: number; lat: number; address?: string }) =>
+    create: (data: { category: string; description: string; lng: number; lat: number; address?: string; city?: string }) =>
       apiFetch('/api/requests', {
         method: 'POST',
         body: JSON.stringify(data),

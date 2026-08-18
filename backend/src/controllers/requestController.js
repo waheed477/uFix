@@ -22,7 +22,7 @@ const VALID_CATEGORIES = ['plumber', 'electrician', 'mechanic'];
  */
 const createRequest = async (req, res) => {
   try {
-    const { category, description, lng, lat, address } = req.body;
+    const { category, description, lng, lat, address, city } = req.body;
 
     // Validate category
     if (!category || !VALID_CATEGORIES.includes(category)) {
@@ -97,6 +97,19 @@ const createRequest = async (req, res) => {
       });
     }
 
+    // City handling - for city-based filtering (user request: same city providers only)
+    // If city provided, use it, else try to get from user's profile city or reverse geocode fallback
+    let requestCity = city ? city.trim() : undefined;
+    if (!requestCity) {
+      // Try to get from customer's profile
+      try {
+        const customerUser = await User.findById(req.user.id).select('city');
+        if (customerUser && customerUser.city) {
+          requestCity = customerUser.city;
+        }
+      } catch {}
+    }
+
     const request = new Request({
       customer: req.user.id,
       category,
@@ -106,6 +119,7 @@ const createRequest = async (req, res) => {
         coordinates: [parsedLng, parsedLat] // [lng, lat]
       },
       address: address ? address.trim() : undefined,
+      city: requestCity,
       status: 'pending'
     });
 
@@ -115,60 +129,64 @@ const createRequest = async (req, res) => {
     await request.populate('customer', 'name phone city profilePicture');
 
     // --- Socket.io Real-Time: Emit request:new to nearby providers (Phase 5) ---
-    // FIXED: Provider live request bug - increased broadcast radius and added detailed logging + fallback
-    // Root cause: providers with [0,0] location or just outside 15km were not receiving events
-    // Fix: 25km for primary broadcast + 100km fallback debug for dev, with extensive logging
+    // CITY-BASED FIX: Now includes city for same-city filtering as per user request
     try {
       const io = req.app.get('io');
       if (io) {
-        // Primary: 25km (provider max radius is 25km per model, so use max for broadcast)
+        // Primary: city-based search first (ignore precise location as per user request), plus 25km geo
         let nearbyProviders = await findNearbyProviders({
           lng: parsedLng,
           lat: parsedLat,
           category,
-          maxDistanceKm: 25, // increased from 15 to 25 - matches provider max radiusKm
+          city: requestCity, // NEW: city-based filtering
+          maxDistanceKm: 25,
           limit: 100
         });
 
-        console.log(`📡 createRequest: Searching providers for category=${category} at [${parsedLng},${parsedLat}]`);
-        console.log(`   Primary search 25km -> found ${nearbyProviders.length} providers`);
+        console.log(`📡 createRequest: Searching providers for category=${category} city=${requestCity||'any'} at [${parsedLng},${parsedLat}]`);
+        console.log(`   Primary search city=${requestCity||'any'} + 25km -> found ${nearbyProviders.length} providers`);
 
-        // DEV FALLBACK: If no providers within 25km, try 100km to catch location mismatches during testing
-        // This helps when provider and customer both use DEFAULT_COORDS but slight offset conversion causes >25km (should not, but safe)
+        // Fallback: Try without city but 100km, then city-only
         if (nearbyProviders.length === 0) {
           const fallbackProviders = await findNearbyProviders({
             lng: parsedLng,
             lat: parsedLat,
             category,
+            city: requestCity,
             maxDistanceKm: 100,
             limit: 100
           });
-          console.log(`   Fallback search 100km -> found ${fallbackProviders.length} providers`);
+          console.log(`   Fallback search city=${requestCity} + 100km -> found ${fallbackProviders.length} providers`);
           if (fallbackProviders.length > 0) {
-            console.log(`   Fallback providers details:`, fallbackProviders.map(p => ({
-              id: p._id,
-              name: p.name,
-              category: p.category,
-              isOnline: p.isOnline,
-              isVerified: p.isVerified,
-              distanceKm: p.distanceKm,
-              location: p.location
-            })));
-            // In dev, also emit to fallback providers so testing works even if distance slightly off
             if (process.env.NODE_ENV !== 'production') {
-              console.log(`   ⚠️ Using fallback providers for dev testing - emitting to ${fallbackProviders.length} providers within 100km`);
+              console.log(`   ⚠️ Using fallback providers for dev testing`);
               nearbyProviders = fallbackProviders;
             }
-          } else {
-            // No providers at all - log all providers for debugging
-            const allProviders = await User.find({ role: 'provider' }).select('name category isOnline isVerified location radiusKm').lean();
+          } else if (requestCity) {
+            // Last fallback: city-only without geo
+            const cityOnlyProviders = await findNearbyProviders({
+              lng: parsedLng,
+              lat: parsedLat,
+              category,
+              city: requestCity,
+              maxDistanceKm: 100,
+              limit: 100
+            });
+            console.log(`   City-only fallback for city=${requestCity} -> ${cityOnlyProviders.length} providers`);
+            if (cityOnlyProviders.length > 0) {
+              nearbyProviders = cityOnlyProviders;
+            }
+          }
+          
+          if (nearbyProviders.length === 0) {
+            const allProviders = await User.find({ role: 'provider' }).select('name category isOnline isVerified location city radiusKm').lean();
             console.log(`   ❌ No nearby providers found. All providers in DB (${allProviders.length}):`, allProviders.map(p => ({
               name: p.name,
               category: p.category,
+              city: p.city,
               isOnline: p.isOnline,
               isVerified: p.isVerified,
               location: p.location,
-              radiusKm: p.radiusKm
             })));
           }
         }
@@ -182,6 +200,7 @@ const createRequest = async (req, res) => {
               description: request.description,
               location: request.location,
               address: request.address,
+              city: request.city,
               status: request.status,
               customer: {
                 id: request.customer._id,
@@ -197,17 +216,17 @@ const createRequest = async (req, res) => {
         });
 
         if (process.env.NODE_ENV !== 'production') {
-          console.log(`📤 request:new emitted to ${nearbyProviders.length} nearby ${category} providers for request ${request._id}`);
+          console.log(`📤 request:new emitted to ${nearbyProviders.length} nearby ${category} providers for request ${request._id} (city=${requestCity})`);
         }
 
-        // --- Notification Persistence: Notify each nearby provider (Phase 8) ---
+        // Notification Persistence
         try {
           for (const provider of nearbyProviders) {
             await createNotification({
               userId: provider._id,
               type: 'request_new',
               title: 'New request nearby',
-              body: `${request.category} request: ${request.description.substring(0, 60)}...`,
+              body: `${request.category} request in ${requestCity||'your area'}: ${request.description.substring(0, 60)}...`,
               relatedId: request._id
             });
           }
@@ -220,7 +239,6 @@ const createRequest = async (req, res) => {
       }
     } catch (socketErr) {
       console.error('Socket emit request:new failed:', socketErr.message, socketErr.stack);
-      // Don't fail REST response if socket fails
     }
 
     return res.status(201).json({
@@ -237,6 +255,7 @@ const createRequest = async (req, res) => {
           lat: request.location.coordinates[1]
         },
         address: request.address,
+        city: request.city,
         status: request.status,
         createdAt: request.createdAt
       }
@@ -339,24 +358,18 @@ const getNearbyRequests = async (req, res) => {
 
     const [lng, lat] = provider.location.coordinates; // [lng, lat]
 
-    console.log(`📡 getNearbyRequests: Provider ${provider._id} (${provider.name}) loc=[${lng},${lat}] category=${category} radius=${maxDistanceKm}km online=${provider.isOnline} verified=${provider.isVerified}`);
-
-    // Optional: check isOnline? For offering, must be online, but for viewing nearby we can allow offline
-    // We'll allow offline to view but will block offering if offline (checked in offerController)
-    // If you want to require online for viewing, uncomment:
-    // if (!provider.isOnline) {
-    //   return res.status(403).json({ message: 'Go online to see nearby requests', isOnline: false });
-    // }
+    console.log(`📡 getNearbyRequests: Provider ${provider._id} (${provider.name}) loc=[${lng},${lat}] city=${provider.city||'any'} category=${category} radius=${maxDistanceKm}km online=${provider.isOnline} verified=${provider.isVerified}`);
 
     const requests = await findNearbyRequests({
       lng,
       lat,
       category,
+      city: provider.city, // CITY-BASED: same city requests only as per user request
       maxDistanceKm,
       limit: 50
     });
 
-    console.log(`   -> Found ${requests.length} nearby requests for provider ${provider._id}`);
+    console.log(`   -> Found ${requests.length} nearby requests for provider ${provider._id} (city=${provider.city||'any'})`);
 
     return res.status(200).json({
       status: 'success',
