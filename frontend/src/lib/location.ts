@@ -306,6 +306,20 @@ export function coordsToOffset(
   return { x: 50 + dxM / METERS_PER_UNIT, y: 50 - dyM / METERS_PER_UNIT };
 }
 
+/* Calculate distance using Haversine - for live distance on provider card */
+export function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function toRad(deg: number): number {
+  return (deg * Math.PI) / 180;
+}
+
 export function getPosition(): Promise<{
   coords: Coords;
   accuracy: number | null;
@@ -325,6 +339,34 @@ export function getPosition(): Promise<{
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   });
+}
+
+/* Watch live position - for provider live location tracking */
+export function watchPosition(
+  onUpdate: (coords: Coords, accuracy: number | null) => void,
+  onError?: (err: GeolocationPositionError) => void
+): number | null {
+  if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+    onError?.({ code: 0, message: "geolocation unsupported" } as any);
+    return null;
+  }
+  const watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      onUpdate(
+        { lat: pos.coords.latitude, lng: pos.coords.longitude },
+        pos.coords.accuracy ?? null
+      );
+    },
+    (err) => onError?.(err),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+  );
+  return watchId;
+}
+
+export function clearWatch(watchId: number) {
+  if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+    navigator.geolocation.clearWatch(watchId);
+  }
 }
 
 /* Google Maps Integration - Optional */

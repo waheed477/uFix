@@ -131,6 +131,10 @@ function AppShell() {
   const unread = conversationList(jobs, messages, user?.role).reduce((s, c) => s + c.unread, 0);
 
   const renderScreen = () => {
+    // Provider should not have request creation option - only customer demand
+    if (screen === "newRequest" && isProvider) {
+      return <ProviderHome />;
+    }
     switch (screen) {
       case "newRequest":
         return <NewRequest />;
