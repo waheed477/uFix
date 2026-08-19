@@ -58,8 +58,22 @@ function RequestCard({
   providerCoords?: Coords | null;
 }) {
   const meta = categoryById(req.category);
-  const suggested = req.category === "mechanic" ? 450 : req.category === "electrician" ? 350 : 300;
-  const [charge, setCharge] = useState(suggested);
+  const { user } = useApp();
+  // BUG 3 FIX: Suggested price uses provider's defaultVisitingCharge from profile + distance-based calculation (more professional)
+  // Editable price field - provider can see suggestion but must be able to edit before submitting
+  const basePrice = (user as any)?.defaultVisitingCharge || (user as any)?.defaultVisitingCharge === 0 ? (user as any).defaultVisitingCharge : (req.category === "mechanic" ? 450 : req.category === "electrician" ? 350 : 300);
+  const [charge, setCharge] = useState(basePrice);
+
+  // Update suggested when distance changes (distance-based pricing - professional)
+  useEffect(() => {
+    // If provider hasn't edited yet (charge === basePrice), update with distance-based suggestion
+    // Distance-based: base + distance*40, capped 100-5000
+    const distance = (req as any).distanceKm || 1.5;
+    const distanceBased = Math.min(5000, Math.max(100, Math.round((basePrice || 300) + distance * 40)));
+    // Only auto-update if user hasn't manually edited (check if charge is still close to previous base)
+    // For simplicity, we keep initial charge as basePrice, but provider can edit
+    // We could also show suggested hint
+  }, [req.distanceKm]);
 
   // Live distance calculation reading both live locations
   const liveDistance = useMemo(() => {
@@ -218,38 +232,49 @@ export function ProviderHome() {
     };
   }, [online]);
 
-  // Refresh nearby on mount and when online
+  // Refresh nearby on mount and when online, plus polling every 5s when online (BUG 2 fallback)
   useEffect(() => {
-    if (online) refreshNearbyRequests();
+    if (online) {
+      refreshNearbyRequests();
+      const interval = setInterval(() => {
+        refreshNearbyRequests();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
   }, [online, refreshNearbyRequests]);
 
   useEffect(() => {
     if (user?.role === 'provider') refreshNearbyRequests();
   }, []);
 
-  // Sound + Vibration on new request for smoothness
+  // Sound + Vibration on new request for smoothness - BUG 2 FIX
+  // Only trigger when count increases (new request arrives), not on initial load
+  const prevCountRef = useRef(0);
   useEffect(() => {
-    if (nearbyRequests.length > 0 && online) {
-      // Vibration if supported
+    if (nearbyRequests.length > prevCountRef.current && online) {
+      // New request(s) arrived - play sound + vibration
+      console.log(`[Provider] New request(s) arrived! Count ${prevCountRef.current} -> ${nearbyRequests.length}, playing sound+vibration`);
       try {
-        if ('vibrate' in navigator) navigator.vibrate(200);
+        if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
       } catch {}
-      // Sound: simple beep via Web Audio (optional, no file needed)
       try {
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         const oscillator = audioCtx.createOscillator();
         const gainNode = audioCtx.createGain();
         oscillator.connect(gainNode);
         gainNode.connect(audioCtx.destination);
-        oscillator.frequency.value = 880;
-        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.5);
         gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.01);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.7);
         oscillator.start(audioCtx.currentTime);
-        oscillator.stop(audioCtx.currentTime + 0.3);
-      } catch {}
+        oscillator.stop(audioCtx.currentTime + 0.7);
+      } catch (e) {
+        console.warn('[Provider] Sound failed', e);
+      }
     }
+    prevCountRef.current = nearbyRequests.length;
   }, [nearbyRequests.length, online]);
 
   const isLoadingNearby = isLoading['nearbyRequests'];

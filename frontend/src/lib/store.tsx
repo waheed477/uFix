@@ -356,7 +356,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return [incoming, ...prev];
         });
 
-        showToast(`New ${backendRequest.category} request nearby`, 'info');
+        // BUG 2 FIX: Play sound + vibration for provider when new matching request arrives
+        // This must happen WITHOUT requiring manual refresh - card appears via setNearbyRequests above
+        try {
+          // Vibration
+          if ('vibrate' in navigator) {
+            navigator.vibrate([200, 100, 200]);
+          }
+          // Sound via Web Audio
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          if (audioCtx) {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.4);
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.01);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.6);
+          }
+        } catch (e) {
+          console.warn('[Store] Sound/vibration failed', e);
+        }
+
+        showToast(`New ${backendRequest.category} request in ${backendRequest.city || 'your city'} nearby`, 'info');
       } catch (e) {
         console.error('Failed to handle request:new', e);
       }
