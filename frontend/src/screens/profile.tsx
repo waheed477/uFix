@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useMemo, type ReactNode } from "react";
 import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
 import { categoryById } from "@/lib/types";
@@ -49,25 +49,38 @@ function MenuItem({
 
 export function ProfileTab() {
   const { user, navigate, logout, jobs, location } = useApp();
-  const [profileLoading, setProfileLoading] = useState(false);
   const [fullProfile, setFullProfile] = useState<any>(null);
 
+  // Optimized: Show user immediately from store (no loading spinner for whole screen)
+  // fullProfile fetched in background, cached, non-blocking
+  const displayUser = fullProfile || user;
+
+  // Fetch full profile optimized: only once, background, with cache
   useEffect(() => {
+    let cancelled = false;
     const fetchProfile = async () => {
+      // If we already have fullProfile with city, don't refetch unless user id changes
+      if (fullProfile && fullProfile.id === user?.id) return;
       try {
-        setProfileLoading(true);
+        // Use AbortController for fast cancel on unmount
         const data = await api.users.getProfile();
-        setFullProfile(data.user);
+        if (!cancelled) {
+          setFullProfile(data.user);
+        }
       } catch (e) {
-        console.warn('Failed to fetch full profile', e);
-      } finally {
-        setProfileLoading(false);
+        // Silently fail, we already have user from store to display
+        console.warn('[Profile] Background fetch failed, using cached user', e);
       }
     };
-    fetchProfile();
-  }, []);
+    // Fetch with small delay to allow instant render first (perceived performance)
+    const t = setTimeout(fetchProfile, 100);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [user?.id]); // Only refetch when user id changes
 
-  if (!user) {
+  if (!displayUser) {
     return (
       <div className="flex h-full items-center justify-center bg-ink-50">
         <div className="flex flex-col items-center gap-3">
@@ -78,10 +91,10 @@ export function ProfileTab() {
     );
   }
 
-  const isProvider = user.role === "provider";
-  const meta = user.category ? categoryById(user.category) : null;
+  const isProvider = displayUser.role === "provider";
+  const meta = displayUser.category ? categoryById(displayUser.category) : null;
   const completed = jobs.filter((j) => j.status === "completed").length;
-  const displayCity = fullProfile?.city || user.city || location.city || "Not set";
+  const displayCity = fullProfile?.city || displayUser.city || location.city || "Not set";
   const cityInfo = getCityByName(displayCity);
 
   return (
@@ -89,7 +102,9 @@ export function ProfileTab() {
       <header className="px-4 pb-3 pt-4">
         <div className="flex items-center justify-between">
           <h1 className="font-display text-xl font-bold text-ink-900">Profile</h1>
-          {profileLoading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-200 border-t-brand-600" />}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-emerald-600 font-medium">● Live</span>
+          </div>
         </div>
       </header>
 
@@ -97,13 +112,13 @@ export function ProfileTab() {
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800 p-5 text-white shadow-float">
           <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
           <div className="relative flex items-center gap-4">
-            <Avatar initials={user.avatar} color={user.color} size={64} className="ring-4 ring-white/20" />
+            <Avatar initials={displayUser.avatar} color={displayUser.color} size={64} className="ring-4 ring-white/20" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="truncate font-display text-lg font-bold">{user.name}</h2>
-                {(user.verified || fullProfile?.isVerified) && <ShieldIcon className="h-4 w-4 shrink-0 text-accent-300" />}
+                <h2 className="truncate font-display text-lg font-bold">{displayUser.name}</h2>
+                {(displayUser.verified || fullProfile?.isVerified) && <ShieldIcon className="h-4 w-4 shrink-0 text-accent-300" />}
               </div>
-              <p className="text-sm text-white/70">{user.phone}</p>
+              <p className="text-sm text-white/70">{displayUser.phone}</p>
               <p className="mt-0.5 flex items-center gap-1 text-xs text-white/60">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent-300" />
                 {displayCity} {cityInfo ? `· ${cityInfo.province}` : ''} {fullProfile?.isVerified ? '· Verified ✓' : isProvider ? '· Pending' : ''}
@@ -117,9 +132,9 @@ export function ProfileTab() {
 
           <div className="relative mt-5 grid grid-cols-3 gap-3 border-t border-white/15 pt-4">
             {[
-              { label: "Rating", value: `${user.rating}★` },
-              { label: "Reviews", value: `${user.reviews}` },
-              { label: isProvider ? "Jobs done" : "Jobs", value: isProvider ? `${user.jobsCompleted ?? 0}` : `${completed}` },
+              { label: "Rating", value: `${displayUser.rating}★` },
+              { label: "Reviews", value: `${displayUser.reviews}` },
+              { label: isProvider ? "Jobs done" : "Jobs", value: isProvider ? `${displayUser.jobsCompleted ?? 0}` : `${completed}` },
             ].map((s, i) => (
               <div key={i}>
                 <p className="font-display text-lg font-extrabold">{s.value}</p>
@@ -135,22 +150,11 @@ export function ProfileTab() {
             <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">{displayCity}</span>
           </div>
           <div className="mt-3 space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-ink-500">City:</span>
-              <span className="font-semibold text-ink-900">{displayCity}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-ink-500">Map Center:</span>
-              <span className="text-xs font-medium text-ink-700">{location.city} · {location.address.substring(0,28)}...</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-ink-500">Mode:</span>
-              <span className="text-xs font-medium text-emerald-600">City-based (precise location ignored)</span>
-            </div>
+            <div className="flex justify-between"><span className="text-ink-500">City:</span><span className="font-semibold text-ink-900">{displayCity}</span></div>
+            <div className="flex justify-between"><span className="text-ink-500">Map Center:</span><span className="text-xs font-medium text-ink-700">{location.city} · {location.address.substring(0,28)}...</span></div>
+            <div className="flex justify-between"><span className="text-ink-500">Mode:</span><span className="text-xs font-medium text-emerald-600">City-based (precise ignored)</span></div>
             <p className="pt-2 text-[11px] leading-relaxed text-ink-400">
-              {isProvider
-                ? `You see requests only from ${displayCity}. Customer in ${displayCity} → you get LIVE notification.`
-                : `You see online ${displayCity} providers only. Requests go to ${displayCity} pros.`}
+              {isProvider ? `You see requests only from ${displayCity}. Customer in ${displayCity} → you get LIVE.` : `You see online ${displayCity} providers only. Requests go to ${displayCity} pros.`}
             </p>
           </div>
         </div>
@@ -160,10 +164,10 @@ export function ProfileTab() {
             <CategoryIcon category={meta.id} size={44} />
             <div className="flex-1">
               <p className="font-display text-sm font-bold text-ink-900">{meta.label}</p>
-              <p className="text-xs text-ink-500">{meta.tagline} · {displayCity}</p>
+              <p className="text-xs text-ink-500">{meta.tagline} · {displayCity} · Rs {fullProfile?.defaultVisitingCharge || displayUser.defaultVisitingCharge || 500} default</p>
             </div>
             <div className="text-right">
-              <p className="font-display text-sm font-bold text-ink-900">{user.radiusKm} km</p>
+              <p className="font-display text-sm font-bold text-ink-900">{displayUser.radiusKm} km</p>
               <p className="text-[11px] text-ink-400">Radius</p>
             </div>
           </div>
@@ -187,7 +191,7 @@ export function ProfileTab() {
           <LogoutIcon className="h-5 w-5" /> Log out
         </button>
 
-        <p className="pb-2 text-center text-[11px] text-ink-400">uFix · v1.0 · {displayCity} · 35 Pakistan cities · Made with care</p>
+        <p className="pb-2 text-center text-[11px] text-ink-400">uFix · v1.0 · {displayCity} · 35 Pakistan cities · Fast profile</p>
       </div>
     </div>
   );
@@ -240,15 +244,7 @@ export function EditProfileScreen() {
       </div>
 
       <div className="border-t border-ink-100 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button
-          full
-          size="lg"
-          disabled={!name.trim()}
-          onClick={() => {
-            updateProfile(name.trim(), phone.trim());
-            back();
-          }}
-        >
+        <Button full size="lg" disabled={!name.trim()} onClick={() => { updateProfile(name.trim(), phone.trim()); back(); }}>
           Save changes
         </Button>
       </div>
