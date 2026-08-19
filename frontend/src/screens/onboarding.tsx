@@ -677,14 +677,14 @@ export function ProviderSetupScreen() {
             <div className="rounded-2xl border-2 border-accent-200 bg-accent-50 p-5">
               <div className="mb-2 flex items-end justify-between">
                 <span className="text-sm font-bold text-ink-800">Default Visiting Charge (Your Price)</span>
-                <span className="font-display text-3xl font-bold text-accent-600">₹{price}</span>
+                <span className="font-display text-3xl font-bold text-accent-600">PKR {price}</span>
               </div>
               <p className="mb-3 text-xs text-ink-500">This price will be shown to customers in {`your city`} when they browse online {category || 'plumbers'}. Customer will directly book you at this price.</p>
               <input type="range" min={100} max={2000} step={50} value={price} onChange={(e) => setPrice(+e.target.value)} className="w-full accent-accent-500" />
               <div className="mt-1 flex justify-between text-[11px] font-medium text-ink-400"><span>Rs 100</span><span>Rs 2000</span></div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {[300,500,750,1000,1500].map(p=>(
-                  <button key={p} onClick={()=>setPrice(p)} className={cn("rounded-full border px-3 py-1 text-xs font-semibold", price===p ? "border-accent-500 bg-accent-500 text-white" : "border-ink-200 bg-white text-ink-500")}>₹{p}</button>
+                  <button key={p} onClick={()=>setPrice(p)} className={cn("rounded-full border px-3 py-1 text-xs font-semibold", price===p ? "border-accent-500 bg-accent-500 text-white" : "border-ink-200 bg-white text-ink-500")}>PKR {p}</button>
                 ))}
               </div>
             </div>

@@ -160,7 +160,7 @@ function RequestCard({
       {/* Offer Input */}
       <div className="mt-3 flex items-center gap-2 border-t border-ink-100 pt-3">
         <div className="flex h-11 items-center rounded-xl border-2 border-ink-200 bg-white px-3 focus-within:border-brand-500">
-          <span className="text-sm font-bold text-ink-400">₹</span>
+          <span className="text-sm font-bold text-ink-400">PKR </span>
           <input
             type="number"
             value={charge}
@@ -289,7 +289,7 @@ export function ProviderHome() {
 
         <div className="grid grid-cols-3 gap-2.5">
           {[
-            { label: "Today's earnings", value: `₹${earnings}`, icon: <BanknoteIcon className="h-4 w-4" /> },
+            { label: "Today's earnings", value: `PKR ${earnings}`, icon: <BanknoteIcon className="h-4 w-4" /> },
             { label: "Jobs done", value: `${user?.jobsCompleted ?? 0}`, icon: <BriefcaseIcon className="h-4 w-4" /> },
             { label: "Rating", value: `${user?.rating ?? 4.8}★`, icon: <Stars value={user?.rating ?? 4.8} size={12} /> },
           ].map((s, i) => (

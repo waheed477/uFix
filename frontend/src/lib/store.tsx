@@ -1031,7 +1031,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       // Show toast, but don't create job yet - job will be created when customer accepts
       // For provider UX, we can optimistically show that offer sent
-      showToast(`Offer of ₹${charge} sent`, 'send');
+      showToast(`Offer of PKR ${charge} sent`, 'send');
 
       // Note: In real flow, job will be created on acceptance via socket offer:accepted event
       // That event will trigger refreshJobs and navigate to activeJob

@@ -281,7 +281,7 @@ const adaptJobForFrontend = (job, options = {}) => {
     providerAvatarColor: provider ? stringToColor(providerName) : stringToColor(providerName),
     providerAvatarInitials: provider ? getInitials(providerName) : getInitials(providerName),
     providerRating: provider ? (provider.rating || 4.8) : 4.8,
-    fee: offer ? `₹${offer.visitingCharge}` : undefined,
+    fee: offer ? `PKR ${offer.visitingCharge}` : undefined,
     rating: undefined, // for completed jobs, rating will be added later
     review: undefined,
     // Status history for timeline debugging

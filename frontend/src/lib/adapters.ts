@@ -255,7 +255,7 @@ export const adaptBackendJobToFrontendJob = (backendJob: any, options: { baseCoo
     providerAvatarColor: stringToColor(providerName),
     providerAvatarInitials: getInitials(providerName),
     providerRating: provider ? (provider.rating ?? 4.8) : 4.8,
-    fee: offer ? `₹${offer.visitingCharge}` : undefined,
+    fee: offer ? `PKR ${offer.visitingCharge}` : undefined,
     // Keep backend raw
     _backend: backendJob,
     _geoLocation: {

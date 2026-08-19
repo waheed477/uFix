@@ -681,7 +681,7 @@ export function HistoryScreen() {
           address: item.address || '',
           status: (item.status === 'completed' ? 'completed' : item.status === 'cancelled' ? 'cancelled' : item.status) as any,
           createdAt: item.completedAt ? new Date(item.completedAt).getTime() : (item.createdAt ? new Date(item.createdAt).getTime() : Date.now()),
-          fee: item.offer ? `₹${item.offer.visitingCharge}` : undefined,
+          fee: item.offer ? `PKR ${item.offer.visitingCharge}` : undefined,
         } as Job;
       });
 

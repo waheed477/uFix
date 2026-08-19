@@ -242,7 +242,7 @@ const createOffer = async (req, res) => {
             userId: reqCustomerId,
             type: 'new_offer',
             title: 'New offer received',
-            body: `${offer.provider.name} offered ₹${offer.visitingCharge} for your ${request.category} request`,
+            body: `${offer.provider.name} offered PKR ${offer.visitingCharge} for your ${request.category} request`,
             relatedId: offer._id
           });
           console.log(`🔔 Notification new_offer created for customer ${reqCustomerId}`);
