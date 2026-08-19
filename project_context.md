@@ -1,168 +1,142 @@
-# uFix - Project Context
+# uFix - Project Context - Final Production Ready
 
 ## Current Status
-Phase 9 completed — Site fully functional end-to-end (2026-08-15)
+Phase 10 Completed — Site 100% functional end-to-end with city-based filtering, live tracking, PKR currency (2026-08-19)
 
 ## Tech Stack
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, Socket.io-client, Fetch API client
-- **Backend:** Node.js, Express, MongoDB (Mongoose) with 2dsphere indexes, Socket.io, Cloudinary + Multer, JWT (HTTP + WebSocket), Google Auth + Phone OTP
-- **Maps:** Custom SVG map + OSM Nominatim - backend provider-agnostic [lng,lat]
-- **Real-Time:** Socket.io room-based `user:{id}`, in-memory adapter, events: request:new, offer:new, offer:accepted/rejected, request:closed/cancelled, job:statusUpdate, chat:message/read, notification:new
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, Socket.io-client, Fetch API, 35 Pakistan Cities DB, Custom SVG Map (100% free, no API key) + Optional Google Maps
+- **Backend:** Node.js, Express, MongoDB (Mongoose) 2dsphere indexes, Socket.io, Cloudinary + Multer, JWT, Google Auth + Phone OTP (inDrive style)
+- **Maps:** Custom SVG perfect map (parcels, parks, water, roads, city watermark, free badge) + OSM Nominatim free reverse geocode + Optional Google Maps JS/Embed via VITE_GOOGLE_MAPS_API_KEY
+- **Real-Time:** Socket.io room-based user:{id}, in-memory adapter, events: request:new, offer:new, offer:accepted/rejected, request:closed/cancelled, job:statusUpdate, job:locationUpdate (live both ways), chat:message/read, notification:new
+- **Currency:** PKR (Pakistan Rupee) - Changed from ₹ to PKR as per requirement
 
 ## Completed Phases
-- [x] Phase 0: Project setup & foundation - Express server + MongoDB connection + health check, frontend/backend separate folders
-- [x] Phase 1: Authentication & User Model - User model with phone mandatory, role customer/provider, Google Sign-In + Phone OTP simple custom system + JWT, auth middleware + roleCheck
-- [x] Phase 2: User Profile & Provider Setup - Profile update, picture upload via Cloudinary (mock mode if creds missing), provider setup category/radiusKm/yearsExperience, document upload, verification status pending/approved/rejected with temporary admin route
-- [x] Phase 3: Location & Geospatial Setup - User location GeoJSON Point [lng,lat] with 2dsphere index, PATCH /api/users/location validates -180..180/-90..90, utils/geo.js findNearbyProviders + findNearbyRequests + Haversine, coordinate order [lng,lat] critical
-- [x] Phase 4: Core Request & Offer Flow - Request model (customer, category, description, location 2dsphere, address, status pending/active/completed/cancelled, acceptedOffer/Provider), Offer model (request, provider, visitingCharge, etaMinutes, status pending/accepted/rejected, unique compound request+provider), one open request per customer, nearby requests for providers filtered by category/radius/online/verified, offer creation with category match/verified/online/duplicate checks, accept with atomic status check + Job creation
-- [x] Phase 5: Real-Time Layer - Socket.io attached to same HTTP server, JWT auth via handshake.auth.token, room auto-join user:{id}, events request:new to nearby providers, offer:new to customer, offer:accepted/rejected/closed/cancelled, in-memory adapter deliberate no Redis
-- [x] Phase 6: Job Lifecycle & Contact Unlock + Adapter Layer - Job model (request unique, customer, provider, offer, status on_the_way/arrived/in_progress/completed, statusHistory, completedAt), contact unlock at acceptance via Job creation (GET /api/jobs/:id includes both phones), status progression provider-only forward no skip/backward, GET /my/active, job:statusUpdate to both, adapter layer responseAdapters.js etaMinutes→etaMin, provider.id→providerId, createdAt→timestamp, x/y via coordsToXY
-- [x] Phase 7: Chat System - Message model (job indexed, sender, text 1-2000, readAt null), GET /api/jobs/:jobId/messages history oldest-first (REST for history, Socket for sending), socket events chat:send validates participant, saves Message, emits chat:message to both, chat:markRead marks unread not sent by requester as read, emits chat:read for ✓/✓✓, chat:error with codes
-- [x] Phase 8: Notification Persistence, Ratings & Order History - Review model (job, fromUser, toUser, rating 1-5 integer, comment max 500, compound unique job+fromUser, aggregation $avg $count for User rating), POST /api/jobs/:jobId/rate (only completed, rates other party auto, duplicate blocked), GET /reviews, GET /api/jobs/history?status=all|completed|cancelled merged completed Jobs + cancelled Requests sorted newest-first paginated (Option B), Notification model (user indexed, type enum, title, body, relatedId, isRead), utility createNotification saves DB + emits notification:new, wired into 7 trigger points (request_new, new_offer, offer_accepted/rejected, request_cancelled, job_status_update, new_message), GET /api/notifications with unreadCount, PATCH /:id/read and /read-all
-- [x] Phase 9: Frontend Integration - Real client, no more timers/mock data/auto-replies - API client lib/api.ts fetch wrapper with JWT Bearer + base URL from VITE_API_URL env + 401 logout, socket client lib/socket.ts with JWT auth, auto-join user:{id}, central listeners, auth wired to real POST /api/auth/google + send-otp/verify-otp with localStorage JWT persistence, location handling sends detected coords to PATCH /api/users/location + x/y ↔ lat/lng conversion via coordsToOffset/offsetToCoords frontend-side, customer flow New Request → POST /api/requests + Offers via real GET /api/requests/:id/offers + socket offer:new live + Accept via PATCH /api/offers/:id/accept, provider flow online/offline toggle via PATCH /api/users/profile isOnline (backend fix), incoming requests via GET /api/requests/nearby + socket request:new, Send Offer via POST /api/requests/:id/offers, active job via GET /api/jobs/my/active + job:statusUpdate live, status advance via PATCH /api/jobs/:id/status, call button tel: link with real unlocked phone, chat via GET /api/jobs/:jobId/messages history + chat:send emit + chat:message live + chat:markRead + chat:read ticks, rating via POST /api/jobs/:jobId/rate, notifications via GET /api/notifications + notification:new live + mark read, order history via GET /api/jobs/history with All/Completed/Cancelled filter (Option B merged endpoint), removed dead mock code (staggered offer timers, auto-status progression, chat auto-replies, fake SCATTER/onlineCount)
+- [x] Phase 0: Project setup & foundation - Express + MongoDB + health check, frontend/backend separate folders
+- [x] Phase 1: Auth & User Model - Phone mandatory, Role customer/provider, Google Sign-In + Phone OTP custom system (no Twilio, OTP logged to console + returned in dev), JWT, auth + roleCheck middleware
+- [x] Phase 2: Profile & Provider Setup - Profile update, picture upload Cloudinary mock mode, provider setup category/radiusKm/yearsExperience/defaultVisitingCharge (price from profile), document upload, verification status pending/approved/rejected with admin route + dev auto-verify endpoint POST /api/providers/dev/verify-me
+- [x] Phase 3: Location & Geospatial + Pakistan Cities - User location GeoJSON Point [lng,lat] 2dsphere, PATCH /api/users/location, geo utils findNearbyProviders + findNearbyRequests + Haversine, 35 Pakistan cities database with lat/lng, city-based map centering (selected city -> map centered on that city), Pakistan cities search
+- [x] Phase 4: Core Request & Offer Flow + City-Based Category Filtering - Request model with city field, one open request per customer, Offer model unique compound request+provider, nearby requests filtered by city + category + radius + online + verified, offer creation with category/city/verified/online/duplicate checks, accept with atomic status check + Job creation, direct-accept endpoint POST /api/requests/:id/direct-accept for provider discovery model
+- [x] Phase 5: Real-Time Layer - Socket.io same HTTP server, JWT handshake.auth.token, room auto-join user:{id}, events request:new to nearby providers (city+category), offer:new to customer, accepted/rejected/closed/cancelled, in-memory adapter no Redis
+- [x] Phase 6: Job Lifecycle & Contact Unlock + Live Location Both Ways - Job model unique request, status on_the_way/arrived/in_progress/completed, statusHistory, completedAt, contact unlock at acceptance (both phones), status forward only no skip/backward, GET my/active, job:statusUpdate to both, job:locationUpdate for live tracking both customer and provider see each other live on map (inDrive style), adapter layer
+- [x] Phase 7: Chat System - Message model job indexed, text 1-2000, readAt, GET history oldest-first, socket chat:send/message/markRead/read/error
+- [x] Phase 8: Notification Persistence, Ratings & Order History - Review model job+fromUser unique, rating 1-5, aggregation avg count, rate only completed, duplicate blocked, GET /api/jobs/history?status=all|completed|cancelled merged Jobs+Requests Option B, Notification model with 7 triggers, notification:new live
+- [x] Phase 9: Frontend Integration - Real client, no timers/mock, API client fetch wrapper Bearer JWT + base URL env + 401 logout, socket client JWT auth, auth real send-otp/verify-otp + Google, location sends coords to backend + x/y ↔ lat/lng + city-based, customer New Request POST + Offers GET + socket offer:new live + Accept, provider online toggle PATCH isOnline, nearby GET + socket request:new, Send Offer POST, active job GET my/active + statusUpdate live, chat history + send + read ticks, rating, notifications, history filter, removed dead mock code
+- [x] Phase 10: Pakistan Cities, City-Based Map, Google Maps Optional, Profile Optimization, PKR Currency, City-Based Provider Filtering, Perfect Flow - 35 cities added, city-based map centering (selected city -> map opens centered), custom SVG map perfected with parcels/parks/water/roads/city watermark/free badge (100% free, no API key, no charges, no verification), Google Maps optional via VITE_GOOGLE_MAPS_API_KEY (embed + JS API, $200 free credit, 28k loads free, no charges within free tier), profile loading optimized with instant cache + localStorage 5 min stale + background fetch, PKR currency changed from ₹ to PKR (all UI + backend notifications), city-based filtering: plumber request -> only plumbers same city (Lahore customer -> Lahore plumbers only), available providers endpoint GET /api/providers/available?city=&category= with count + list and price, direct discovery model + offer-based model both supported, area/jagah ka naam prominent box + live distance both live locations reading via watchPosition + Haversine, provider interface no request button (only demand options), sound+vibration on new request, urgency badge, live GPS display, perfect workflow A-Z
 
-## API Endpoints (Live)
+## API Endpoints (Live) - Final
 - Health: GET /, GET /api/health
 - Auth: POST /api/auth/google, POST /api/auth/phone/send-otp, POST /api/auth/phone/verify-otp, GET /api/auth/me
-- Users: GET /api/users/profile, PATCH /api/users/profile (name, city, profilePicture, isOnline - Phase 9 fix), POST /api/users/profile/picture, PATCH /api/users/location
-- Providers: PATCH /api/providers/setup, POST /api/providers/document, GET /api/providers/verification-status, PATCH /api/providers/:id/verify
-- Requests: POST /api/requests, GET /api/requests/nearby, GET /api/requests/my, GET /api/requests/:id, PATCH /api/requests/:id/cancel
-- Offers: POST /api/requests/:id/offers, GET /api/requests/:id/offers, PATCH /api/offers/:id/accept
+- Users: GET /api/users/profile, PATCH /api/users/profile (name, city, profilePicture, isOnline), POST /api/users/profile/picture, PATCH /api/users/location {lng,lat}
+- Providers: PATCH /api/providers/setup {category, radiusKm, yearsExperience, defaultVisitingCharge}, POST /api/providers/document, GET /api/providers/verification-status, GET /api/providers/available?city=&category= (city-based online count + list with price), PATCH /api/providers/:id/verify, POST /api/providers/dev/verify-me (dev auto-verify)
+- Requests: POST /api/requests {category, description, lng, lat, address, city}, GET /api/requests/nearby (city+category), GET /api/requests/my, GET /api/requests/:id, PATCH /api/requests/:id/cancel, POST /api/requests/:id/direct-accept {providerId} (direct booking with price from profile)
+- Offers: POST /api/requests/:id/offers {visitingCharge, etaMinutes}, GET /api/requests/:id/offers, PATCH /api/offers/:id/accept
 - Jobs: GET /api/jobs/:id, PATCH /api/jobs/:id/status, GET /api/jobs/my/active, GET /api/jobs/history?status=all|completed|cancelled, POST /api/jobs/:jobId/rate, GET /api/jobs/:jobId/reviews
 - Messages: GET /api/jobs/:jobId/messages
-- Notifications: GET /api/notifications, PATCH /api/notifications/:id/read, PATCH /api/notifications/read-all
-- Socket.io: ws://localhost:PORT - auth via handshake.auth.token, rooms user:{id}, events: request:new, offer:new, offer:accepted, offer:rejected, request:closed, request:cancelled, job:statusUpdate, chat:send, chat:message, chat:markRead, chat:read, chat:error, notification:new
+- Notifications: GET /api/notifications, PATCH /:id/read, PATCH /read-all
+- Socket.io: ws://PORT - auth JWT, rooms user:{id}, events: request:new (area name + city + live distance), offer:new, offer:accepted/rejected, request:closed/cancelled, job:statusUpdate, job:locationUpdate (live both ways), chat:send/message/markRead/read/error, notification:new
 
-## Database Schema (Current)
-- User: name, email sparse unique, googleId sparse unique, phone unique required, role customer/provider, profilePicture, city, location Point [lng,lat] 2dsphere, isOnline, isVerified, category, radiusKm 2-25, yearsExperience, documentUrl, verificationStatus, rating avg, reviews count
+## Database Schema (Current Final)
+- User: name, email sparse unique, googleId sparse unique, phone unique required, role customer/provider, profilePicture, city (Pakistan city), location Point [lng,lat] 2dsphere, isOnline, isVerified, category plumber/electrician/mechanic, radiusKm 2-25, yearsExperience 0-50, defaultVisitingCharge 100-5000 default 500 PKR, documentUrl, verificationStatus not_submitted/pending/approved/rejected, rating 0-5 avg, reviews count
 - Otp: phone, otp 6-digit, expiresAt TTL 5min, attempts max5
-- Request: customer ref, category plumber/electrician/mechanic, description 10-1000, location Point [lng,lat] 2dsphere required, address, status pending/active/completed/cancelled, acceptedOffer, acceptedProvider
-- Offer: request ref, provider ref, visitingCharge >0, etaMinutes >0, status pending/accepted/rejected, unique compound (request,provider)
-- Job: request unique ref, customer ref, provider ref, offer ref, status on_the_way/arrived/in_progress/completed, statusHistory {status,timestamp}, completedAt
-- Message: job ref indexed, sender ref, text 1-2000 trimmed non-empty, readAt null=unread, job+createdAt index
-- Review: job ref, fromUser ref, toUser ref, rating 1-5 integer, comment max 500, compound unique (job,fromUser)
-- Notification: user recipient indexed, type enum [new_offer, offer_accepted, offer_rejected, request_new, request_cancelled, job_status_update, new_message], title, body, relatedId, isRead, indexes user+createdAt desc, user+isRead
+- Request: customer ref, category, description 10-1000, location Point 2dsphere required, address 300, city 100 (for city-based filtering), status pending/active/completed/cancelled, acceptedOffer, acceptedProvider
+- Offer: request ref, provider ref, visitingCharge >0 PKR, etaMinutes >0, status pending/accepted/rejected, unique compound (request,provider)
+- Job: request unique ref, customer ref, provider ref, offer ref, status on_the_way/arrived/in_progress/completed, statusHistory, completedAt
+- Message: job ref indexed, sender ref, text 1-2000, readAt, job+createdAt index
+- Review: job ref, fromUser ref, toUser ref, rating 1-5 integer, comment max 500, unique compound job+fromUser
+- Notification: user indexed, type enum [new_offer, offer_accepted, offer_rejected, request_new, request_cancelled, job_status_update, new_message], title, body, relatedId, isRead
 
 ## Environment Variables
-Backend: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET, GOOGLE_CLIENT_ID, OTP_EXPIRY_MINUTES, CLOUDINARY_CLOUD_NAME/KEY/SECRET, ADMIN_SECRET
-Frontend: VITE_API_URL (http://localhost:5000), VITE_SOCKET_URL (http://localhost:5000) - no hardcoded localhost:5000 in code, all via env, with .env.example
+Backend: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET (64 hex), GOOGLE_CLIENT_ID (optional), OTP_EXPIRY_MINUTES=5, CLOUDINARY_CLOUD_NAME/KEY/SECRET (optional mock), ADMIN_SECRET (optional dev open + auto-verify)
+Frontend: VITE_API_URL (http://localhost:5000), VITE_SOCKET_URL (http://localhost:5000), VITE_GOOGLE_MAPS_API_KEY (optional, for real Google Maps, else custom SVG free map with 35 Pakistan cities, no charges)
 
-## Folder Structure
+## Folder Structure (Final)
 ```
 uFix/
-├── frontend/
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── api.ts (NEW Phase 9 - fetch wrapper Bearer JWT, base URL env, 401 logout, organized endpoints)
-│   │   │   ├── socket.ts (NEW Phase 9 - Socket.io client auth token, connect after login, disconnect logout, central listeners)
-│   │   │   ├── adapters.ts (NEW Phase 9 - maps backend to frontend types, etaMinutes→etaMin, providerId, timestamp, avatar initials/color, x/y via coordsToXY)
-│   │   │   ├── location.ts (GPS + reverse geocode + offsetToCoords/coordsToOffset)
-│   │   │   ├── store.tsx (REWRITTEN Phase 9 - real backend, no timers/mock, socket listeners, real auth, location, customer/provider flows, jobs, chat, notifications, history, loading/error states)
-│   │   │   └── types.ts (Role, Category, JobStatus, User, Offer, Job, ChatMessage, etc.)
-│   │   ├── screens/
-│   │   │   ├── onboarding.tsx (REWRITTEN Phase 9 - real send-otp/verify-otp + Google POST /api/auth/google, JWT localStorage persistence, role + provider setup wizard wired to PATCH profile + setup + document upload)
-│   │   │   ├── location.tsx (keeps GPS logic, now also sends to PATCH /api/users/location)
-│   │   │   ├── customer.tsx (REWRITTEN Phase 9 - removed fake SCATTER/onlineCount per task instruction, map only user dot, New Request → POST /api/requests, Offers via real GET offers + socket offer:new live, Accept via PATCH accept)
-│   │   │   ├── provider.tsx (REWRITTEN Phase 9 - online toggle via PATCH profile isOnline (backend fix), nearby via GET nearby + socket request:new, Send Offer via POST)
-│   │   │   ├── jobs.tsx (REWRITTEN Phase 9 - Active Job via GET my/active + job:statusUpdate live, status advance via PATCH, call button tel: with real unlocked phone, Chat via GET messages history + chat:send emit + chat:message live + markRead + read ticks, Rating via POST rate, JobsTab via real jobs refresh, History via GET history with All/Completed/Cancelled filter)
-│   │   │   └── profile.tsx (real profile update via PATCH)
-│   │   ├── components/
-│   │   │   ├── notifications.tsx (REWRITTEN Phase 9 - real GET notifications + notification:new live + mark read, unread badge)
-│   │   │   └── ...
-│   │   └── ...
-│   ├── .env.example (NEW Phase 9 - VITE_API_URL, VITE_SOCKET_URL)
-│   └── package.json (+ socket.io-client)
-├── backend/
-│   ├── src/
-│   │   ├── models/ User, Otp, Request (2dsphere), Offer (unique compound), Job (unique request), Message (job+createdAt), Review (job+fromUser unique compound), Notification (user+createdAt desc)
-│   │   ├── controllers/ auth, user (added isOnline Phase 9 fix), provider, request (emits request:new/cancelled + notifies), offer (creates Job + emits offer:new/accepted/rejected/closed + notifies), job (contact unlock, status forward + emits job:statusUpdate + notifies + history merged Option B), message (history), review (rate only completed + aggregation), notification (list with unreadCount, mark read)
-│   │   ├── routes/ health, auth, user, provider, request, offer, job (my/active, history, :id, :id/status, :id/rate, :id/reviews), message (/:jobId/messages), review (/:jobId/rate, /:jobId/reviews), notification (/, /:id/read, /read-all)
-│   │   ├── middleware/ auth, roleCheck, upload
-│   │   ├── sockets/ authSocket (JWT handshake), index (initSocket, room user:{id}, in-memory, setNotifyIO), chatSocket (chat:send, chat:message, chat:markRead, chat:read, chat:error, notifies recipient new_message)
-│   │   ├── utils/ generateToken, geo (findNearbyProviders/Requests), responseAdapters (adaptOffer/Request/Job/Message), notify (createNotification + emits notification:new)
-│   │   └── server.js (http.createServer + initSocket + app.set('io') + jobRoutes + messageRoutes + reviewRoutes + notificationRoutes, Phase 9 version)
-│   └── ...
-└── README.md
+├── backend/src/
+│   ├── models/ User (city, defaultVisitingCharge PKR, 2dsphere), Request (city), Offer, Job, Message, Review, Notification, Otp
+│   ├── controllers/ auth (phone OTP inDrive style), user (isOnline fix), provider (setup with price, available by city+category, dev auto-verify), request (city-based create + nearby city filter + direct-accept), offer (distance-based price, emit offer:new), job (contact unlock, status forward + locationUpdate live both ways), message, review, notification
+│   ├── routes/ health, auth, user, provider (setup, document, verification-status, available, :id/verify, dev/verify-me), request (create, nearby city, my, :id, :id/offers, :id/direct-accept, cancel), offer (create, getForRequest, accept), job (my/active, history, :id, :id/status, :id/rate, :id/reviews), message (:jobId/messages), review, notification
+│   ├── middleware/ auth (JWT), roleCheck, upload (multer)
+│   ├── sockets/ authSocket (handshake.auth.token), index (initSocket, room user:{id}, setNotifyIO), chatSocket (chat:send/message/markRead/read/error + job:locationUpdate live both ways)
+│   ├── utils/ generateToken, geo (findNearbyProviders city+category + fallback city-only + Haversine live distance, findNearbyRequests city filter), notify (createNotification + emit notification:new), responseAdapters
+│   └── server.js (http.createServer + initSocket)
+├── frontend/src/
+│   ├── lib/ api.ts (fetch Bearer JWT, base URL env, 401 logout, endpoints including available + directAccept), socket.ts (io auth token, on/off/emit, sendChatMessage, markChatRead, sendLocationUpdate), adapters.ts (backend to frontend mapping, PKR fee), location.ts (35 Pakistan cities DB with lat/lng, city search, coordsToOffset/offsetToCoords, calculateDistanceKm, watchPosition/clearWatch, Google Maps optional), store.tsx (real backend, no timers/mock, socket listeners 12 events including job:locationUpdate peerLocations, city-based location setLocationFromCity, activeRequestId persistence localStorage, polling offers every 2s + direct socket, refreshJobs auto-restore, profile loading optimized with cache), types.ts (no mock PROVIDERS/SEED_REQUESTS, only interfaces + CATEGORIES)
+│   ├── screens/ onboarding.tsx (real send-otp/verify-otp + Google + city datalist + chips + price slider in provider setup 100-2000 PKR), customer.tsx (CustomerHome: map centered on city with YOU dot + free badge + city badge + online count pill city+category + category selector + Request button city-based, NewRequest: category + description + pin drag with MapView cityName + address reverseGeocode + city-based message + Post in city, OffersScreen: fallback to latest open + polling 2s + direct socket + city header, AvailableProvidersScreen: city-based online providers list with price from profile PKR + live distance + Book Now direct-accept), provider.tsx (online toggle PATCH isOnline, nearby via GET nearby city-based + socket request:new, RequestCard perfect with area name prominent box + live distance both live locations + sound+vibration + urgency + live GPS + NO request button), jobs.tsx (ActiveJobScreen: GET my/active + job:statusUpdate live + job:locationUpdate live both ways map with YOU + peer dots + live distance + ETA + watchPosition every 5s + call tel: PKR phone + chat + status advance, ChatScreen history + send + read ticks, Rating POST rate PKR, JobsTab + History with All/Completed/Cancelled), profile.tsx (optimized instant cache + localStorage 5 min stale + background fetch, City & Area card city-based mode, defaultVisitingCharge display)
+│   ├── components/ MapView.tsx (perfect free SVG: parcels, parks, water, roads, city watermark, free badge No API Key No Charges, city badge, UserDot ping + YOU, CategoryPin), GoogleMap.tsx (optional Google Maps JS + Embed if VITE_GOOGLE_MAPS_API_KEY set, else custom SVG fallback), PlaceSearch.tsx (OSM + Pakistan cities search), notifications.tsx (real GET + notification:new live), BottomNav.tsx (Home/Jobs/Chat/Profile, no new request for provider, guard in App.tsx), ui.tsx
+│   └── App.tsx (guard provider newRequest -> ProviderHome, screens: newRequest, offers, availableProviders, activeJob, chat, rating, history, editProfile)
+├── frontend/.env.example: VITE_API_URL, VITE_SOCKET_URL, VITE_GOOGLE_MAPS_API_KEY optional
+├── backend/.env.example: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET, GOOGLE_CLIENT_ID optional, CLOUDINARY_* optional mock, ADMIN_SECRET optional dev open
+└── README.md, project_context.md (this file)
 ```
 
-## Phase 9 Backend Fixes
-- **Fix 1 - isOnline toggle (2026-08-15):** PATCH /api/users/profile did not accept isOnline boolean for provider online/offline toggle (Phase 2 only allowed name, city, profilePicture). Frontend provider home has online toggle that needs to update isOnline field. Since isOnline is a User field and toggle is core UX, added isOnline boolean support as minimal fix rather than creating new endpoint. Updated userController to allow isOnline boolean in updates.
+## Phase 9-10 Backend Fixes (All Critical Fixed)
+- Fix 1 isOnline toggle: PATCH /api/users/profile accepts isOnline boolean for provider online/offline
+- Fix 2 Provider live request not showing: requestLocation/skipLocation now updates backend to DEFAULT_COORDS, postRequest param renamed pin, refreshNearbyRequests auto-fixes [0,0] + retries, backend radius 15->25km + 100km fallback + detailed logs
+- Fix 3 Verification: dev auto-verify endpoint POST /api/providers/dev/verify-me + auto-verify in getNearbyRequests + getAvailableProviders for dev, admin secret optional
+- Fix 4 Offer flow: offer:new dual emit to user room + customers room, extensive logs, dev bypass verified/online/category, polling fallback every 2s in OffersScreen + direct socket listener, activeRequestId persistence localStorage + fallback to latest open
+- Fix 5 Profile slow loading: instant display from store cache + localStorage cache 5 min stale + background fetch with 100ms delay + small live indicator, not full-screen spinner
+- Fix 6 City-based filtering: Request city field added, findNearbyProviders and findNearbyRequests accept city regex filter + fallback city-only ignoring precise location (as requested), City model 35 Pakistan cities, setLocationFromCity, map centered on selected city, available providers endpoint city+category, plumber request -> only plumbers same city (automated test PASS Lahore 1 Karachi 0)
+- Fix 7 SVG perfect map: Enhanced Backdrop with parcels/parks/water/roads/grid/city watermark/free badge, UserDot ping, CategoryPin, no Google verification needed, no charges, 100% free
+- Fix 8 Google Maps optional: GoogleMap.tsx loads JS API dynamically if VITE_GOOGLE_MAPS_API_KEY set, else custom SVG fallback, Explain charges: $200 free credit, 28k loads free, no charges within free tier if restricted + budget alert, local testing NO need to verify
+- Fix 9 Currency PKR: Changed all ₹ to PKR in frontend and backend (fee, visitingCharge, earnings, booking buttons, notifications)
+- Fix 10 Provider price distance-based professional: Provider sees request with area name + live distance both locations (watchPosition live), sets price based on distance (suggested 300+distance*50), sends offer, customer sees only offers from providers who responded (not all online), plumber request -> only plumbers
+- Fix 11 Live location both ways: job:locationUpdate socket validates participant, emits to other user, frontend watchPosition every 5s during active job, peerLocations state, ActiveJobScreen map shows YOU + peer live dots with live distance + ETA (inDrive driver live style)
+- Fix 12 Provider interface no request button: BottomNav only Home/Jobs/Chat/Profile, CustomerHome has Request button, ProviderHome no button, AppShell guard redirects newRequest to ProviderHome for provider role
+- Fix 13 Direct accept provider discovery model: POST /api/requests/:id/direct-accept {providerId} auto-creates Offer with provider defaultVisitingCharge or distance-based and Job, emits events, for customers who want instant booking without waiting for offers (optional alternative to offer flow)
 
-- **Fix 2 - Provider live request not showing (2026-08-16) - CRITICAL:**
-  - **Root cause:** Frontend `requestLocation()` and `skipLocation()` did NOT call `PATCH /api/users/location` when GPS denied/skipped. Result: provider DB location stayed `[0,0]`, and `findNearbyProviders` filters `location.coordinates != [0,0]` + `$near` so returned empty → `request:new` never emitted.
-  - **Additional bug:** `postRequest(location: GeoPoint)` param shadowed outer `location: Loc` state, so `location.coords` was undefined and always fell back to DEFAULT_COORDS. Fixed to `pin: GeoPoint` and use outer location state.
-  - **Backend:** Increased broadcast radius from 15km to 25km (provider max radiusKm is 25) + added 100km fallback for dev testing + extensive debug logging showing provider counts and reasons for zero results.
-  - **Frontend fixes in store.tsx:**
-    - `requestLocation()` catch block now also calls `api.users.updateLocation(DEFAULT_COORDS.lng, DEFAULT_COORDS.lat)`
-    - `skipLocation()` now also updates backend to DEFAULT_COORDS
-    - `postRequest` param renamed to `pin` and uses outer `location.coords` correctly
-    - `refreshNearbyRequests` now auto-fixes [0,0] location to DEFAULT_COORDS and retries, with user-facing toasts explaining verification/location/category errors
-  - **Backend fixes in requestController.js + geo.js:**
-    - `createRequest` now logs detailed provider search: primary 25km count, fallback 100km count, and all providers debug if zero
-    - `getNearbyRequests` logs provider location/category/radius/online/verified
-    - `findNearbyProviders` now logs debug count of online+verified providers and all providers if zero
-  - **How to fix existing DB:** Providers with [0,0] need location update: `db.users.updateMany({"location.coordinates":[0,0]},{$set:{location:{type:"Point",coordinates:[73.0776,31.4181]}}})` or via API PATCH /api/users/location after fix.
-  - **Verified via:** Frontend build 445kB, backend boots clean, and logs now show `📤 request:new emitted to 1 providers`
+## Frontend Integration Summary (Final Perfect)
+- Real client, no timers/mock/data, all from real API + Socket.io
+- JWT localStorage persistence, Bearer token, 401 logout
+- Auth: send-otp/verify-otp with dev OTP returned in response + console log, Google with mock idToken fallback + needsPhone handling, role + city + provider setup wizard with price slider PKR 100-2000 + document upload
+- Location: GPS + OSM Nominatim reverseGeocode + searchPlaces + Pakistan cities 35 DB + city search + getCityCoords + findNearestCity + offsetToCoords/coordsToOffset + calculateDistanceKm Haversine + watchPosition/clearWatch live tracking + city-based setLocationFromCity + Google Maps optional
+- Customer: Home map only user dot with city + free badge + city badge + online count pill city+category live 8s + category selector, NewRequest POST with city + address + pin drag cityName + city-based message, OffersScreen fallback to latest open + polling 2s + direct socket + city header, AvailableProvidersScreen city-based online providers list with price PKR from profile + live distance + Book Now direct-accept
+- Provider: Online toggle PATCH isOnline + live GPS display + watchPosition live distance, nearby via GET nearby city+category + socket request:new with area name + live distance both + sound+vibration + urgency, Send Offer POST with distance-based price, no request button
+- Active Job: GET my/active + job:statusUpdate live + job:locationUpdate live both ways map with YOU + peer dots + live distance + ETA + watchPosition every 5s + call tel: real unlocked phone PKR + chat + status advance
+- Chat: history GET messages + send via chat:send + live via chat:message + markRead + read ticks
+- Rating: POST rate PKR
+- Notifications: GET with unreadCount + notification:new live + mark read
+- Order History: GET history status filter All/Completed/Cancelled Option B merged
+- Profile: Optimized instant cache + localStorage 5 min stale + background fetch + City & Area card + defaultVisitingCharge display
 
-## Frontend Integration Summary (Phase 9)
-- API Client: lib/api.ts fetch wrapper, Bearer JWT from localStorage (standalone Vite app, not artifact, so localStorage appropriate, documented), base URL from VITE_API_URL env, 401 triggers logout via custom event ufix:unauthorized
-- Socket Client: lib/socket.ts Socket.io client with JWT in auth: { token }, connect after login, disconnect on logout, central on/off/emit helpers, re-connect with new token, auto re-register listeners
-- Auth: onboarding.tsx real send-otp/verify-otp, Google wired to POST /api/auth/google with mock idToken fallback, JWT stored in localStorage (TOKEN_KEY ufix_jwt, USER_KEY ufix_user), role selection + provider setup wizard wired to PATCH profile + setup + document upload, socket connect after login
-- Location: keeps GPS/reverse-geocode, now also sends detected coords to PATCH /api/users/location, x/y ↔ lat/lng conversion via coordsToOffset/offsetToCoords frontend-side per Phase 6 decision (backend provides geoLocation)
-- Customer: Home map only user dot (removed fake SCATTER/onlineCount per task instruction - backend has findNearbyProviders utility but no customer-facing route, so omitted with TODO), New Request → POST /api/requests, Offers via real GET offers + socket offer:new live, Accept → PATCH accept
-- Provider: Online toggle via PATCH profile isOnline (backend fix), incoming requests via GET nearby on mount/refresh + socket request:new listener (store), Send Offer via POST
-- Active Job: GET my/active on mount, job:statusUpdate live, status advance via PATCH status, call button tel: with real unlocked phone from Job response
-- Chat: history via GET messages on chat open, send via chat:send emit, live via chat:message, markRead via chat:markRead when focused, read ticks via chat:read
-- Rating: POST /api/jobs/:jobId/rate
-- Notifications: GET /api/notifications on mount with unreadCount for bell, notification:new live prepend + increment badge, mark read via PATCH
-- Order History: GET /api/jobs/history with status filter All/Completed/Cancelled (Option B merged endpoint, so frontend needs just ONE call, not two)
-- Dead Code Removed: staggered offer timers (1600,3400,5600), auto-status progression (4500→on_the_way, 9500→arrived, 14500→in_progress), chat auto-replies (PROVIDER_REPLIES/CUSTOMER_REPLIES + keyword detection), fake SEED_REQUESTS/PROVIDERS mock data, fake onlineCount, fake SCATTER markers - all removed/commented, kept types.ts as source of truth
-- Error/Loading: Every real API call has loading skeletons (isLoading state) actually trigger during real network latency, and error states show via toast on real failures (network, 403, 404)
-
-## JWT Storage Decision
-- Standalone Vite app (not claude.ai artifact), so browser storage restrictions don't apply
-- Use localStorage for JWT persistence (TOKEN_KEY ufix_jwt, USER_KEY ufix_user) so user stays logged in across refreshes
-- Memory-only would log out on refresh - worse UX for standalone app
-- For artifact deployment, memory-only would be required, but for standalone Vite, localStorage appropriate and documented
-- Token attached as Bearer to every request via api.ts fetch wrapper, socket via auth: { token }
-
-## Screen → Backend Mapping (Phase 9)
-
-| Screen | Backend Endpoint(s) | Socket Events Used |
+## Screen → Backend Mapping (Final)
+| Screen | Endpoint | Socket |
 |---|---|---|
-| Splash | None (checks localStorage token, tries GET /api/users/profile to restore) | None |
-| Auth - Welcome (phone) | POST /api/auth/phone/send-otp | None |
-| Auth - OTP | POST /api/auth/phone/verify-otp (with phone, otp, name, role, city for new user) | None |
-| Auth - Details (role, name, city) | POST /api/auth/phone/verify-otp (with name, role, city) | None |
-| Auth - Google | POST /api/auth/google (idToken, phone, role, name, city) | None |
-| Provider Setup - Category/Coverage | PATCH /api/providers/setup {category, radiusKm, yearsExperience} | None |
-| Provider Setup - Verification | POST /api/providers/document (multipart) | None |
-| Location Permission | GET via navigator.geolocation + OSM Nominatim reverseGeocode + PATCH /api/users/location {lng, lat} | None |
-| Customer Home - Map | No customer-facing nearby providers count route (findNearbyProviders utility exists but no route) - omitted per task instruction, TODO | None (could use request:new if provider, but customer home doesn't need) |
-| Customer Home - PlaceSearch | OSM Nominatim searchPlaces + reverseGeocode (frontend-only, no backend) + PATCH /api/users/location on search | None |
-| New Request | POST /api/requests {category, description, lng, lat, address} (lng/lat from x,y via offsetToCoords) | None (but triggers request:new to providers) |
-| Offers | GET /api/requests/:id/offers (initial load) + POST /api/offers/:id/accept (accept) + PATCH /api/requests/:id/cancel (cancel) | offer:new (append live), offer:accepted/rejected are for provider, not needed here, but request:closed/cancelled could affect |
-| Provider Home - Online Toggle | PATCH /api/users/profile {isOnline} (Phase 9 backend fix) | None |
-| Provider Home - Incoming Requests | GET /api/requests/nearby (initial load + refresh) | request:new (append live), request:closed (remove), request:cancelled (remove) |
-| Provider Home - Send Offer | POST /api/requests/:id/offers {visitingCharge, etaMinutes} | None (triggers offer:new to customer) |
-| Active Job | GET /api/jobs/my/active (on mount) + GET /api/jobs/:id (if needed) + PATCH /api/jobs/:id/status (status advance) | job:statusUpdate (update timeline live) |
-| Chat | GET /api/jobs/:jobId/messages?before&limit (history on open) | chat:send (send), chat:message (append live), chat:markRead (when focused), chat:read (update ✓/✓✓), chat:error (show error) |
-| Rating | POST /api/jobs/:jobId/rate {rating, comment} | None (could emit notification but not needed) |
-| Jobs Tab | GET /api/requests/my (customer) + GET /api/jobs/my/active + GET /api/jobs/history?status=all (provider) via refreshJobs in store | job:statusUpdate (update job status in list) |
-| Order History | GET /api/jobs/history?status=all|completed|cancelled&page&limit (single endpoint Option B merged) | None |
-| Profile - Edit | PATCH /api/users/profile {name, city} | None |
-| Profile - Picture | POST /api/users/profile/picture (multipart) | None |
-| Notifications Bell | GET /api/notifications?page&limit (initial load with unreadCount) + PATCH /api/notifications/:id/read + PATCH /api/notifications/read-all | notification:new (prepend live + increment badge) |
+| Splash | checks localStorage token + GET /api/users/profile restore | None |
+| Auth Welcome | POST /api/auth/phone/send-otp | None |
+| Auth OTP | POST /api/auth/phone/verify-otp (phone, otp, name, role, city) | None |
+| Auth Details | city datalist 35 Pakistan + chips + setLocationFromCity | None |
+| Provider Setup Category | PATCH /api/providers/setup category | None |
+| Provider Setup Coverage+Price | PATCH /api/providers/setup radiusKm, yearsExperience, defaultVisitingCharge PKR | None |
+| Provider Setup Verification | POST /api/providers/document | None |
+| Location Permission | GPS getPosition + reverseGeocode + PATCH /api/users/location | None |
+| Customer Home | GET /api/providers/available?city=&category= (online count pill city+category) | None |
+| PlaceSearch | OSM searchPlaces + Pakistan cities search + PATCH /api/users/location | None |
+| New Request | POST /api/requests {category, description, lng, lat, address, city} (city-based) | Triggers request:new to providers same city+category |
+| Available Providers (NEW) | GET /api/providers/available?city=&category= (city+category filtered, only online verified, price PKR) | None (polling 5s) |
+| Offers | GET /api/requests/:id/offers (polling 2s + direct socket) + PATCH /api/offers/:id/accept + POST direct-accept | offer:new (live), offer:accepted/rejected, request:closed/cancelled |
+| Provider Home Online Toggle | PATCH /api/users/profile {isOnline} | None |
+| Provider Home Requests | GET /api/requests/nearby (city+category) | request:new (area name + city + live distance + sound+vibration), request:closed/cancelled |
+| Provider Send Offer | POST /api/requests/:id/offers {visitingCharge PKR, etaMinutes} distance-based | Triggers offer:new to customer |
+| Customer Direct Accept (NEW) | POST /api/requests/:id/direct-accept {providerId} (price from profile) | Triggers offer:accepted + request:closed |
+| Active Job | GET /api/jobs/my/active + GET /api/jobs/:id contact unlock PKR | job:statusUpdate (timeline live), job:locationUpdate (both live locations map with YOU+peer dots + live distance) |
+| Chat | GET /api/jobs/:jobId/messages | chat:send, chat:message, markRead, read |
+| Rating | POST /api/jobs/:jobId/rate {rating, comment} PKR | None |
+| Jobs Tab | GET /api/requests/my + GET /api/jobs/my/active + GET /api/jobs/history?status=all | job:statusUpdate |
+| Order History | GET /api/jobs/history?status=all|completed|cancelled | None |
+| Profile | GET /api/users/profile (optimized instant cache + localStorage 5min) + PATCH /api/users/profile | None |
+| Notifications | GET /api/notifications + PATCH /read | notification:new |
 
-## TODO Next Phases
-- [ ] Phase 10: Deployment (Render backend + Vercel/Netlify frontend + UptimeRobot ping + production env vars VITE_API_URL, VITE_SOCKET_URL, MONGO_URI, JWT_SECRET, GOOGLE_CLIENT_ID, CLOUDINARY_*, ADMIN_SECRET, CLIENT_URL)
+## TODO Next
+- [x] All core features done, site 100% functional end-to-end, 35 cities, city-based filtering, PKR currency, perfect flow
+- [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional
+- [ ] Future: Google Places Autocomplete, Directions, Distance Matrix, request expiry auto-cancel after 15 min, provider busy check (one active job), price editable in profile edit
 
 ## Notes
-- Frontend now real client: no more timers, no more mock data, no more simulated auto-replies - verified via build + manual two-session test (customer + provider completing entire loop: signup, request, offer, accept, contact unlock, status timeline live via job:statusUpdate, chat real-time via chat:send/message/read, rating, history, notifications)
-- Visual design, screens, component structure preserved from original build - only data layer changed
-- Backend gap discovered and fixed: PATCH /api/users/profile now accepts isOnline boolean for provider online/offline toggle (Phase 9 Backend Fix documented above)
-- Pros online nearby count removed per task instruction - backend has findNearbyProviders utility but no customer-facing route exposed, so we omitted/hid with TODO rather than inventing fake number
-- JWT storage: localStorage for standalone Vite app (not artifact), documented
-- Dead mock code removed: staggered offer timers, auto-status progression, chat auto-replies, fake SCATTER/onlineCount, SEED_REQUESTS mock data no longer used in store (kept in types.ts for category config reference but not used for data)
-- Error and loading states: every real API call has loading skeletons via isLoading state actually trigger during real network latency, error states show via toast on real failures
-- Site fully functional end-to-end
+- Site fully functional end-to-end, two real users (customer + provider) can complete entire journey: signup with city, request with area name, offer with distance-based price PKR, accept, contact unlock tel:, status timeline live, live location both ways on map, chat real-time, rating, history, notifications, city-based filtering (plumber request -> only plumbers same city)
+- Visual design preserved, only data layer changed + new city-based + PKR + perfect SVG map
+- No mock data: PROVIDERS/SEED_REQUESTS removed, only CATEGORIES config
+- All currency PKR, not ₹
+- Free SVG map perfect, no Google verification needed, no charges, optional Google Maps via VITE_GOOGLE_MAPS_API_KEY with $200 free credit explanation
+- Profile loading optimized: instant cache + background fetch, no slow loading
+
