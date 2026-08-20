@@ -155,6 +155,11 @@ const getAvailableProviders = async (req, res) => {
       filter.category = category;
     }
     if (city) filter.city = { $regex: new RegExp(`^${city}$`, 'i') };
+    // Provider Availability Lock (Part 1): exclude busy providers (active job) from the
+    // bookable list - directAccept would reject them anyway, so don't offer a dead "Book Now".
+    const Job = require('../models/Job');
+    const busyProviderIds = await Job.distinct('provider', { status: { $ne: 'completed' } });
+    if (busyProviderIds.length > 0) filter._id = { $nin: busyProviderIds };
     const count = await User.countDocuments(filter);
     const providers = await User.find(filter).select('name category city rating reviews profilePicture isOnline defaultVisitingCharge yearsExperience').limit(20).lean();
     return res.status(200).json({

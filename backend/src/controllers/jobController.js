@@ -536,6 +536,7 @@ const getOrderHistory = async (req, res) => {
         type: 'request',
         id: req._id,
         status: req.status, // cancelled
+        cancelledReason: req.cancelledReason || null, // 'customer' vs 'expired' (Part 2)
         category: req.category,
         description: req.description,
         location: req.location,
@@ -569,6 +570,7 @@ const getOrderHistory = async (req, res) => {
         type: 'request',
         id: req._id,
         status: req.status,
+        cancelledReason: req.cancelledReason || null,
         category: req.category,
         description: req.description,
         location: req.location,
@@ -614,6 +616,7 @@ const getOrderHistory = async (req, res) => {
             category: item.category,
             description: item.description,
             status: 'cancelled',
+            cancelledReason: item.cancelledReason || null,
             address: item.address,
             createdAt: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
             type: 'request',

@@ -231,7 +231,7 @@ function OfferCard({ offer, onAccept, onDecline, index, isAccepting }: { offer: 
 }
 
 export function OffersScreen() {
-  const { back, jobs, activeRequestId, acceptOffer, declineOffer, cancelRequest, isLoading, location } = useApp();
+  const { back, jobs, activeRequestId, acceptOffer, declineOffer, cancelRequest, isLoading, location, navigate } = useApp();
   const [sort, setSort] = useState<"price" | "eta">("price");
   const [offers, setOffers] = useState<Offer[]>([]);
   const [loadingOffers, setLoadingOffers] = useState(true);
@@ -288,6 +288,10 @@ export function OffersScreen() {
     }
   }, [request?.offers]);
 
+  // Expiry pass (Part 2): most recent auto-expired request, for the empty state below
+  const latestExpired = jobs.filter((j: any) => j.status === 'cancelled' && j.cancelledReason === 'expired')
+    .sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+
   if (!request) {
     return (
       <div className="flex h-full flex-col bg-ink-50">
@@ -295,10 +299,20 @@ export function OffersScreen() {
           <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
           <h1 className="font-display text-lg font-bold text-ink-900">Offers</h1>
         </header>
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="text-sm font-medium text-ink-500">No active request found in {location.city}.</p>
-          <Button size="sm" onClick={back}>Go to Home</Button>
-        </div>
+        {latestExpired ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-2xl">⏰</div>
+            <h3 className="font-display text-base font-bold text-ink-900">Expired — no providers responded in time</h3>
+            <p className="max-w-[280px] text-sm text-ink-500">Requests stay live for 20 minutes. “{latestExpired.description}” got no accepted offer before it expired.</p>
+            <Button size="sm" onClick={() => navigate("newRequest")}>Post again</Button>
+            <Button size="sm" variant="outline" onClick={back}>Go to Home</Button>
+          </div>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+            <p className="text-sm font-medium text-ink-500">No active request found in {location.city}.</p>
+            <Button size="sm" onClick={back}>Go to Home</Button>
+          </div>
+        )}
       </div>
     );
   }

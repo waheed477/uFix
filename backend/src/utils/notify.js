@@ -54,6 +54,7 @@ const createNotification = async ({ userId, type, title, body, relatedId = null 
       'offer_declined',
       'request_new',
       'request_cancelled',
+      'request_expired',
       'job_status_update',
       'new_message',
       'new_rating'

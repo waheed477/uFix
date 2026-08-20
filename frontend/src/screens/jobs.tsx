@@ -7,7 +7,7 @@
  * - Accept from Jobs page navigates to Active Job with contact unlock
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
 import { categoryById, type Job, type JobStatus } from "@/lib/types";
@@ -408,11 +408,18 @@ export function RatingScreen() {
 
 function JobCard({ job, onOpen }: { job: Job; onOpen?: () => void }) {
   const meta = categoryById(job.category);
+  const isExpired = job.status === "cancelled" && job.cancelledReason === "expired";
   return (
     <button onClick={onOpen} className={cn("animate-slide-up flex w-full items-center gap-3 rounded-2xl bg-white p-3.5 text-left shadow-card", onOpen && "active:scale-[0.99]")}>
       <CategoryIcon category={job.category} size={46} soft />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2"><p className="line-clamp-1 font-display text-sm font-bold text-ink-900">{job.description}</p><StatusBadge status={job.status} className="shrink-0" /></div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="line-clamp-1 font-display text-sm font-bold text-ink-900">{job.description}</p>
+          {/* Expired (auto, no providers in 20 min) is distinguished from user-cancelled (Part 2) */}
+          {isExpired
+            ? <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-700">⏰ Expired</span>
+            : <StatusBadge status={job.status} className="shrink-0" />}
+        </div>
         <p className="mt-1 flex items-center gap-1 text-xs text-ink-400"><MapPinIcon className="h-3 w-3 shrink-0" /><span className="truncate">{job.address}</span><span className="text-ink-300">·</span><span className="shrink-0">{timeAgo(job.createdAt)}</span></p>
         <div className="mt-1.5 flex items-center gap-2"><span className="text-[11px] font-semibold" style={{ color: meta.color }}>{meta.label}</span>{job.rating && <span className="flex items-center gap-1"><Stars value={job.rating} size={12} /></span>}{job.fee && <span className="ml-auto text-xs font-bold text-emerald-600">{job.fee}</span>}</div>
       </div>
@@ -427,6 +434,11 @@ export function JobsTab() {
   const active = sorted.find((j) => ["accepted", "on_the_way", "arrived", "in_progress"].includes(j.status));
   const openRequests = sorted.filter((j: any) => j._originalStatus === 'pending' || j.status === 'open');
   const isCustomer = user?.role === 'customer';
+  const hasPending = isCustomer && openRequests.length > 0;
+  // Expiry pass: most recent auto-expired request -> highlight with a "Post again" action
+  const latestExpired = useMemo(() =>
+    !isCustomer ? null : jobs.filter((j: any) => j.status === 'cancelled' && j.cancelledReason === 'expired').sort((a, b) => b.createdAt - a.createdAt)[0] || null
+  , [jobs, isCustomer]);
   const openRequestWithOffers = openRequests.length > 0 ? openRequests[0] : null;
 
   useEffect(() => { refreshJobs(); }, []);
@@ -444,6 +456,23 @@ export function JobsTab() {
         isLoading['jobs'] ? <div className="flex-1 overflow-y-auto px-4 pb-4"><div className="space-y-2.5">{[0, 1, 2].map(i => (<div key={i} className="h-20 animate-pulse rounded-2xl bg-white" />))}</div></div> : <EmptyState icon={<BriefcaseIcon className="h-9 w-9" />} title="No jobs yet" subtitle="Your service requests and completed jobs will show up here." />
       ) : (
         <div className="flex-1 overflow-y-auto px-4 pb-4">
+          {/* Expired request - offer to post again (Part 2). Shown only when nothing else is open. */}
+          {isCustomer && !hasPending && latestExpired && (
+            <div className="mb-4 animate-slide-up flex items-center gap-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-card">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-lg">⏰</div>
+              <div className="min-w-0 flex-1">
+                <p className="font-display text-sm font-bold text-ink-900">Request expired</p>
+                <p className="mt-0.5 line-clamp-1 text-xs text-ink-600">No providers responded in 20 minutes — post it again to get fresh offers.</p>
+              </div>
+              <button
+                onClick={() => navigate("newRequest")}
+                className="tap-highlight-none shrink-0 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-white shadow-card active:scale-95"
+              >
+                Post again
+              </button>
+            </div>
+          )}
+
           {isCustomer && openRequestWithOffers && (
             <div className="mb-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 p-4 shadow-card">
               <div className="flex items-center justify-between">
@@ -495,10 +524,10 @@ export function HistoryScreen() {
       const mapped: Job[] = backendHistory.map((item: any) => {
         if (item.frontend) {
           const f = item.frontend;
-          return { id: f.id || item.id, description: f.description || item.description || 'Past job', category: f.category || item.category || 'plumber', address: f.address || item.address || '', status: (f.status === 'completed' ? 'completed' : f.status === 'cancelled' ? 'cancelled' : f.status) as any, createdAt: f.createdAt || toTimestamp(item.createdAt), fee: f.fee, rating: f.rating } as Job;
+          return { id: f.id || item.id, description: f.description || item.description || 'Past job', category: f.category || item.category || 'plumber', address: f.address || item.address || '', status: (f.status === 'completed' ? 'completed' : f.status === 'cancelled' ? 'cancelled' : f.status) as any, cancelledReason: f.cancelledReason || item.cancelledReason || undefined, createdAt: f.createdAt || toTimestamp(item.createdAt), fee: f.fee, rating: f.rating } as Job;
         }
         const isJob = item.type === 'job';
-        return { id: item.id?.toString() || item._id?.toString(), description: item.description || (isJob ? 'Completed job' : 'Cancelled request'), category: item.category || 'plumber', address: item.address || '', status: (item.status === 'completed' ? 'completed' : item.status === 'cancelled' ? 'cancelled' : item.status) as any, createdAt: item.completedAt ? new Date(item.completedAt).getTime() : (item.createdAt ? new Date(item.createdAt).getTime() : Date.now()), fee: item.offer ? `PKR ${item.offer.visitingCharge}` : undefined } as Job;
+        return { id: item.id?.toString() || item._id?.toString(), description: item.description || (isJob ? 'Completed job' : (item.cancelledReason === 'expired' ? 'Expired request' : 'Cancelled request')), category: item.category || 'plumber', address: item.address || '', status: (item.status === 'completed' ? 'completed' : item.status === 'cancelled' ? 'cancelled' : item.status) as any, cancelledReason: item.cancelledReason || undefined, createdAt: item.completedAt ? new Date(item.completedAt).getTime() : (item.createdAt ? new Date(item.createdAt).getTime() : Date.now()), fee: item.offer ? `PKR ${item.offer.visitingCharge}` : undefined } as Job;
       });
       setHistory(mapped);
     } catch (err: any) { setError(err.message || 'Failed to load history'); } finally { setLoading(false); }

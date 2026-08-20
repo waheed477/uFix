@@ -201,13 +201,14 @@ const SENT_BADGE: Record<SentOffer["status"], { label: string; cls: string }> = 
   declined: { label: "✗ Declined", cls: "bg-rose-100 text-rose-600" },
   rejected: { label: "Not selected", cls: "bg-ink-100 text-ink-500" },
   cancelled: { label: "Request cancelled", cls: "bg-ink-100 text-ink-500" },
+  expired: { label: "⏰ Request expired", cls: "bg-amber-100 text-amber-700" },
 };
 
 function MyOfferCard({ offer, onOpenJob, onDismiss }: { offer: SentOffer; onOpenJob: () => void; onDismiss: () => void }) {
   const meta = categoryById(offer.category);
   const badge = SENT_BADGE[offer.status];
   const isAccepted = offer.status === "accepted";
-  const isTerminal = offer.status === "declined" || offer.status === "rejected" || offer.status === "cancelled";
+  const isTerminal = offer.status === "declined" || offer.status === "rejected" || offer.status === "cancelled" || offer.status === "expired";
   return (
     <div className={cn("flex items-center gap-3 rounded-2xl bg-white p-3.5 shadow-card", isAccepted && "ring-2 ring-emerald-400")}>
       <CategoryIcon category={offer.category} size={40} soft />
@@ -241,7 +242,7 @@ function MyOfferCard({ offer, onOpenJob, onDismiss }: { offer: SentOffer; onOpen
 }
 
 export function ProviderHome() {
-  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location, myOffers, dismissMyOffer, openActiveJob } = useApp();
+  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location, myOffers, dismissMyOffer, openActiveJob, providerBusy } = useApp();
   const online = user?.isOnline ?? false;
   const firstName = user?.name.split(" ")[0] ?? "there";
   const [liveCoords, setLiveCoords] = useState<Coords | null>(null);
@@ -341,6 +342,19 @@ export function ProviderHome() {
           </div>
         </div>
 
+        {/* Availability lock banner - non-intrusive. Provider stays online for the active job's
+            live tracking; only NEW matches are gated until completion (Part 1). */}
+        {providerBusy && (
+          <div className="animate-slide-up flex items-center gap-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-lg text-white">🔒</span>
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-sm font-bold text-ink-900">You have an active job</p>
+              <p className="mt-0.5 text-xs text-ink-600">New requests will appear here once you complete it.</p>
+            </div>
+            <button onClick={openActiveJob} className="tap-highlight-none shrink-0 rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-white active:scale-95">View job</button>
+          </div>
+        )}
+
         <div className="grid grid-cols-3 gap-2.5">
           {[
             { label: "Today's earnings", value: `PKR ${earnings}`, icon: <BanknoteIcon className="h-4 w-4" /> },
@@ -373,16 +387,26 @@ export function ProviderHome() {
         )}
       </div>
 
-      <div className="flex items-center justify-between px-4 pb-2.5">
-        <h2 className="font-display text-base font-bold text-ink-900">Requests in {location.city} · Live distance</h2>
-        <div className="flex items-center gap-2">
-          {online && nearbyRequests.length > 0 && <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700">{nearbyRequests.length} new</span>}
-          {online && <button onClick={() => refreshNearbyRequests()} disabled={isLoadingNearby} className="tap-highlight-none rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink-600 shadow-card active:scale-95 disabled:opacity-50">{isLoadingNearby ? "..." : "Refresh"}</button>}
+      {!providerBusy && (
+        <div className="flex items-center justify-between px-4 pb-2.5">
+          <h2 className="font-display text-base font-bold text-ink-900">Requests in {location.city} · Live distance</h2>
+          <div className="flex items-center gap-2">
+            {online && nearbyRequests.length > 0 && <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700">{nearbyRequests.length} new</span>}
+            {online && <button onClick={() => refreshNearbyRequests()} disabled={isLoadingNearby} className="tap-highlight-none rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink-600 shadow-card active:scale-95 disabled:opacity-50">{isLoadingNearby ? "..." : "Refresh"}</button>}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        {!online ? (
+        {providerBusy ? (
+          // Availability lock: cards hidden entirely (server returns none anyway) - seeing
+          // offers you can't act on would be confusing (documentation: project_context Part 1)
+          <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-amber-200 bg-white px-8 py-12 text-center">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-3xl">🧰</div>
+            <h3 className="font-display text-base font-bold text-ink-900">Focus mode: one job at a time</h3>
+            <p className="mt-1 max-w-[260px] text-sm text-ink-500">You're handling an active job in {location.city}. New matching requests appear automatically once it's completed.</p>
+          </div>
+        ) : !online ? (
           <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-ink-200 bg-white px-8 py-14 text-center">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-ink-100 text-ink-400"><PowerIcon className="h-7 w-7" /></div>
             <h3 className="font-display text-base font-bold text-ink-900">You're offline</h3>

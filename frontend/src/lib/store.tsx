@@ -173,6 +173,10 @@ interface AppContextValue {
   // new for Bidirectional Sync pass - provider's own sent offers with live fate badges
   myOffers: SentOffer[];
 
+  // Availability & Expiry pass - true while the provider has an active job (busy):
+  // nearby request cards are hidden + offers blocked (mirrors backend enforcement)
+  providerBusy: boolean;
+
   // new for Phase 9 - exposed for screens that need real data
   notifications: any[];
   unreadCount: number;
@@ -236,6 +240,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(MY_OFFERS_KEY, JSON.stringify(myOffers.slice(0, 30)));
     } catch {}
   }, [myOffers]);
+
+  // Availability & Expiry pass: busy = provider currently has an active (non-completed) job.
+  // While busy, the backend returns zero nearby requests (hasActiveJob) and rejects new offers;
+  // this flag drives the calm banner + hides request cards client-side as well.
+  const [providerBusy, setProviderBusy] = useState(false);
 
   /** Mark sent offers' fate. Pass offerId or requestId matcher. */
   const markMyOffers = useCallback((matcher: { offerId?: string; requestId?: string }, status: SentOfferStatus) => {
@@ -396,6 +405,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Only for providers
         if (user.role !== 'provider') return;
 
+        // Availability lock: a busy provider (active job) never acts on new requests.
+        // The backend already excludes them from the fan-out; this is a client-side guard
+        // for events that arrived just before the job was accepted (belt-and-suspenders).
+        if (providerBusy) {
+          console.log('[Store] request:new ignored - provider busy with active job');
+          return;
+        }
+
         // Adapt to IncomingRequest
         const incoming = adaptBackendRequestToIncomingRequest(backendRequest, { baseCoords: location.coords || DEFAULT_COORDS });
         
@@ -454,6 +471,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Bidirectional Sync: mark this provider's own sent offer as accepted + celebratory feedback
           if (data.offer?.id) markMyOffers({ offerId: data.offer.id.toString() }, 'accepted');
           notifyAlert('positive');
+
+          // Availability lock: this handler also fires for customers - only the PROVIDER
+          // whose offer was accepted becomes busy (their job room gets this same event)
+          if (user.role === 'provider' && data.offer?.id) {
+            setProviderBusy(true);
+            setNearbyRequests([]);
+          }
 
           showToast(data.message || 'Your offer was accepted! 🎉', 'check');
 
@@ -524,6 +548,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast('Request cancelled by customer', 'info');
     });
 
+    // Request:expired (Availability & Expiry pass) → customer whose request expired, and
+    // providers who offered on it. Lazy backend flips it; this updates cards/badges live.
+    const offRequestExpired = socketClient.on('request:expired', (data: any) => {
+      console.log('[Store] Received request:expired', data);
+      const expiredId = data.requestId?.toString();
+      if (!expiredId) return;
+
+      if (user.role === 'customer') {
+        // Flip their own request to cancelled-with-reason so Jobs/History show "Expired"
+        setJobs(prev => prev.map(j => j.id === expiredId ? { ...j, status: 'cancelled' as any, cancelledReason: 'expired' } : j));
+        // If they were waiting on offers for it, the offers screen falls back to the Expired state
+        setActiveRequestId(prev => {
+          if (prev === expiredId) {
+            persistActiveRequestId(null);
+            return null;
+          }
+          return prev;
+        });
+        showToast('Your request expired — no providers responded in time', 'info');
+      } else {
+        // Provider: drop the card + flip their offer badge to "Request expired"
+        setNearbyRequests(prev => prev.filter(r => r.id !== expiredId));
+        markMyOffers({ requestId: expiredId }, 'expired');
+        showToast('A request you offered on expired', 'info');
+      }
+    });
+
     // Job:statusUpdate → both customer and provider
     const offJobStatusUpdate = socketClient.on('job:statusUpdate', (data: any) => {
       console.log('[Store] Received job:statusUpdate', data);
@@ -551,6 +602,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // - Provider: confirmation on their side too → rate the customer (Phase 8 supports both directions)
         if (newStatus === 'completed') {
           notifyAlert('positive');
+          // Availability lock released: provider is free to receive new matches again
+          if (user.role === 'provider') setProviderBusy(false);
           setActiveJobId(jobId);
           if (user.role === 'customer') {
             showToast('Your job is complete! 🎉 Please rate your experience', 'check');
@@ -685,13 +738,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       offOfferDeclined();
       offRequestClosed();
       offRequestCancelled();
+      offRequestExpired();
       offJobStatusUpdate();
       offChatMessage();
       offChatRead();
       offChatError();
       offNotificationNew();
     };
-  }, [stage, user, draftCategory, location.coords, markMyOffers]);
+  }, [stage, user, draftCategory, location.coords, markMyOffers, providerBusy]);
 
   // Helper for timestamp
   function toTimestamp(date: any): number {
@@ -1246,6 +1300,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // That event will trigger refreshJobs and navigate to activeJob
     } catch (err: any) {
       console.error('Send offer failed', err);
+      // Availability lock: backend rejected because the provider is busy - latch the busy state
+      // so the banner shows and cards stay hidden without another fetch
+      if (err?.data?.hasActiveJob || (err?.message || '').toLowerCase().includes('active job')) {
+        setProviderBusy(true);
+        setNearbyRequests([]);
+      }
       showToast(err.message || 'Failed to send offer', 'info');
     } finally {
       setLoading('sendOffer', false);
@@ -1448,10 +1508,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLoading('nearbyRequests', true);
       const data = await api.requests.nearby();
       const backendRequests = data.requests || [];
-      
-      console.log(`[refreshNearbyRequests] Found ${backendRequests.length} nearby requests`, data.providerLocation);
 
-      const adapted: IncomingRequest[] = backendRequests.map((req: any) => 
+      // Availability lock: backend hides nearby requests for busy providers and flags it.
+      // Sync the flag so the banner shows + cards stay hidden; clears automatically when free.
+      setProviderBusy(!!data.hasActiveJob);
+
+      console.log(`[refreshNearbyRequests] Found ${backendRequests.length} nearby requests (busy=${!!data.hasActiveJob})`, data.providerLocation);
+
+      const adapted: IncomingRequest[] = backendRequests.map((req: any) =>
         adaptBackendRequestToIncomingRequest(req, { baseCoords: location.coords || DEFAULT_COORDS })
       );
 
@@ -1468,6 +1532,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           console.log('[refreshNearbyRequests] Auto-verified, retrying nearby...');
           const retryData = await api.requests.nearby();
           const retryRequests = retryData.requests || [];
+          setProviderBusy(!!retryData.hasActiveJob);
           console.log(`[refreshNearbyRequests] After auto-verify found ${retryRequests.length} requests`);
           const adapted: IncomingRequest[] = retryRequests.map((req: any) => 
             adaptBackendRequestToIncomingRequest(req, { baseCoords: location.coords || DEFAULT_COORDS })
@@ -1483,6 +1548,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           try {
             const retry2 = await api.requests.nearby();
             const retryRequests2 = retry2.requests || [];
+            setProviderBusy(!!retry2.hasActiveJob);
             const adapted2: IncomingRequest[] = retryRequests2.map((req: any) => 
               adaptBackendRequestToIncomingRequest(req, { baseCoords: location.coords || DEFAULT_COORDS })
             );
@@ -1498,6 +1564,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Retry after fix
           const retryData = await api.requests.nearby();
           const retryRequests = retryData.requests || [];
+          setProviderBusy(!!retryData.hasActiveJob);
           console.log(`[refreshNearbyRequests] Retry found ${retryRequests.length} requests`);
           const adapted: IncomingRequest[] = retryRequests.map((req: any) => 
             adaptBackendRequestToIncomingRequest(req, { baseCoords: location.coords || DEFAULT_COORDS })
@@ -1713,6 +1780,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dismissMyOffer,
     completeJob,
     myOffers,
+    providerBusy,
     sendOffer,
     updateJobStatus,
     openChat,

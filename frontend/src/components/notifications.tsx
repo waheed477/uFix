@@ -63,6 +63,7 @@ const typeToIcon = (type: string): IconKey => {
     case 'request_new':
       return 'request';
     case 'request_cancelled':
+    case 'request_expired':
       return 'request';
     case 'job_status_update':
       return 'navigate';
@@ -143,6 +144,7 @@ export function NotificationBell() {
       case 'offer_declined':
       case 'offer_rejected':
       case 'request_cancelled':
+      case 'request_expired':
         // Provider: outcome of an offer they sent (badge lives on home "Your offers", history on jobs)
         setTab('home');
         break;

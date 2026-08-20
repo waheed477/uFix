@@ -37,6 +37,7 @@ const notificationSchema = new mongoose.Schema({
         'offer_declined',   // offer:declined (customer declined a single offer - Bidirectional Sync pass)
         'request_new',      // request:new
         'request_cancelled',// request:cancelled
+        'request_expired',  // request:expired (lazy auto-expiry - Availability & Expiry pass)
         'job_status_update',// job:statusUpdate
         'new_message',      // chat:message
         'new_rating'        // you received a new rating (Bidirectional Sync pass)

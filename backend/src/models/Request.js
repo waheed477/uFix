@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { REQUEST_EXPIRY_MINUTES } = require('../utils/requestConfig');
 
 /**
  * Request Model - Phase 4 Core Business Logic
@@ -78,7 +79,24 @@ const requestSchema = new mongoose.Schema({
     // pending = waiting for offers / no offer accepted yet (frontend: open)
     // active = offer accepted, job in progress (frontend: accepted)
     // completed = job done (full flow Phase 6)
-    // cancelled = customer cancelled before accepting (frontend: cancelled)
+    // cancelled = customer cancelled before accepting OR auto-expired (see cancelledReason)
+  },
+  cancelledReason: {
+    type: String,
+    enum: {
+      values: ['customer', 'expired'],
+      message: 'cancelledReason must be customer or expired'
+    },
+    default: null,
+    // Distinguishes WHO cancelled: 'customer' = user-initiated cancel, 'expired' = auto-expired
+    // after REQUEST_EXPIRY_MINUTES pending with no accepted offer (lazy-check-on-read,
+    // see utils/requestExpiry.js). Used by history/UI to show "Expired" vs "Cancelled".
+  },
+  expiresAt: {
+    type: Date,
+    // Only meaningful while status = 'pending'. Set at creation to createdAt + REQUEST_EXPIRY_MINUTES.
+    // NOT a TTL index - we keep the document for order history; expiry is applied lazily on read.
+    default: () => new Date(Date.now() + REQUEST_EXPIRY_MINUTES * 60 * 1000)
   },
   acceptedOffer: {
     type: mongoose.Schema.Types.ObjectId,

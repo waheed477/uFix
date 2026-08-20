@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Job = require('../models/Job');
 const { findNearbyRequests, findNearbyProviders } = require('../utils/geo');
 const { createNotification } = require('../utils/notify');
+const { expireRequestIfStale, expireStalePendingRequests, REQUEST_EXPIRY_MINUTES } = require('../utils/requestExpiry');
 
 const VALID_CATEGORIES = ['plumber', 'electrician', 'mechanic'];
 
@@ -52,6 +53,17 @@ const createRequest = async (req, res) => {
       city: requestCity,
       status: 'pending'
     });
+    // expiresAt defaults to createdAt + REQUEST_EXPIRY_MINUTES (Request model).
+    // DEV-ONLY test hook: a caller may pass expiresInMinutes (number <= 60) to force a
+    // short expiry for testing the lazy-expiry flow. Ignored entirely in production
+    // and NOT a UI feature.
+    if (process.env.NODE_ENV !== 'production' && req.body.expiresInMinutes !== undefined) {
+      const mins = Number(req.body.expiresInMinutes);
+      if (!isNaN(mins) && mins > 0 && mins <= 60) {
+        request.expiresAt = new Date(Date.now() + mins * 60 * 1000);
+        console.log(`🧪 DEV: request expiry overridden to ${mins} min(s) for testing`);
+      }
+    }
 
     await request.save();
     await request.populate('customer', 'name phone city profilePicture');
@@ -71,6 +83,26 @@ const createRequest = async (req, res) => {
             console.log(`   ❌ No nearby providers found. All providers in DB (${allProviders.length}):`, allProviders.map(p => ({ name: p.name, category: p.category, city: p.city, isOnline: p.isOnline, isVerified: p.isVerified })));
           }
         }
+        // Provider Availability Lock (Part 1): busy providers (active job, status != completed)
+        // must NOT be notified about new requests - they can't act on them. Their live tracking
+        // for the active job is unaffected (they stay online); only new-match eligibility is gated.
+        try {
+          const candidateIds = nearbyProviders.map(p => p._id);
+          if (candidateIds.length > 0) {
+            const busyProviderIds = new Set(
+              (await Job.find({ provider: { $in: candidateIds }, status: { $ne: 'completed' } }).select('provider'))
+                .map(j => j.provider.toString())
+            );
+            const before = nearbyProviders.length;
+            nearbyProviders = nearbyProviders.filter(p => !busyProviderIds.has(p._id.toString()));
+            if (process.env.NODE_ENV !== 'production' && before !== nearbyProviders.length) {
+              console.log(`🔒 Availability lock: excluded ${before - nearbyProviders.length} busy provider(s) from request:new fan-out`);
+            }
+          }
+        } catch (busyErr) {
+          console.warn('Busy-provider filter failed (non-blocking, continuing unfiltered):', busyErr.message);
+        }
+
         nearbyProviders.forEach(provider => {
           io.to(`user:${provider._id}`).emit('request:new', {
             request: {
@@ -100,7 +132,7 @@ const createRequest = async (req, res) => {
     return res.status(201).json({
       status: 'success',
       message: 'Request created successfully',
-      request: { id: request._id, customer: request.customer, category: request.category, description: request.description, location: request.location, readable: { lng: request.location.coordinates[0], lat: request.location.coordinates[1] }, address: request.address, city: request.city, status: request.status, createdAt: request.createdAt }
+      request: { id: request._id, customer: request.customer, category: request.category, description: request.description, location: request.location, readable: { lng: request.location.coordinates[0], lat: request.location.coordinates[1] }, address: request.address, city: request.city, status: request.status, cancelledReason: request.cancelledReason, expiresAt: request.expiresAt, createdAt: request.createdAt }
     });
   } catch (error) {
     console.error('CreateRequest error:', error);
@@ -128,6 +160,27 @@ const getNearbyRequests = async (req, res) => {
     }
     if (!provider.category) return res.status(400).json({ status: 'error', message: 'Provider category not set', needsSetup: true });
 
+    // Provider Availability Lock (Part 1): a BUSY provider (active job, status != completed)
+    // gets NO nearby requests - cleaner than returning cards they can't act on and disabling
+    // them client-side. Server is the source of truth (mirrors the createOffer enforcement);
+    // the frontend shows a calm "you have an active job" banner driven by hasActiveJob.
+    // The provider intentionally stays ONLINE (live tracking for the active job is unaffected).
+    const activeJob = await Job.findOne({ provider: provider._id, status: { $ne: 'completed' } }).select('status');
+    if (activeJob) {
+      return res.status(200).json({
+        status: 'success',
+        message: 'You have an active job - new requests hidden until it is completed',
+        hasActiveJob: true,
+        activeJobStatus: activeJob.status,
+        count: 0,
+        requests: []
+      });
+    }
+
+    // Lazy expiry sweep (Part 2): flip THIS provider's relevant stale pending requests to
+    // cancelled('expired') before listing, so expired requests never reach request cards
+    await expireStalePendingRequests({ category: provider.category, city: provider.city }, req.app.get('io'));
+
     let maxDistanceKm = provider.radiusKm || 10;
     if (req.query.radiusKm) {
       const parsed = parseFloat(req.query.radiusKm);
@@ -145,6 +198,7 @@ const getNearbyRequests = async (req, res) => {
     return res.status(200).json({
       status: 'success',
       message: 'Nearby pending requests found',
+      hasActiveJob: false,
       providerLocation: { lng, lat, category, radiusKm: maxDistanceKm },
       count: requests.length,
       requests: requests.map(r => ({
@@ -168,8 +222,12 @@ const getNearbyRequests = async (req, res) => {
 
 const getMyRequests = async (req, res) => {
   try {
+    // Lazy expiry sweep (Part 2): this customer's own stale pending requests flip to
+    // cancelled('expired') so their Jobs tab / offers screens never act on them
+    await expireStalePendingRequests({ customer: req.user.id }, req.app.get('io'));
+
     const requests = await Request.find({ customer: req.user.id }).populate('acceptedOffer').populate('acceptedProvider', 'name phone category rating profilePicture').sort({ createdAt: -1 });
-    return res.status(200).json({ status: 'success', count: requests.length, requests: requests.map(r => ({ id: r._id, category: r.category, description: r.description, location: r.location, address: r.address, city: r.city, status: r.status, acceptedOffer: r.acceptedOffer, acceptedProvider: r.acceptedProvider, createdAt: r.createdAt, updatedAt: r.updatedAt })) });
+    return res.status(200).json({ status: 'success', count: requests.length, requests: requests.map(r => ({ id: r._id, category: r.category, description: r.description, location: r.location, address: r.address, city: r.city, status: r.status, cancelledReason: r.cancelledReason, acceptedOffer: r.acceptedOffer, acceptedProvider: r.acceptedProvider, createdAt: r.createdAt, updatedAt: r.updatedAt, expiresAt: r.expiresAt })) });
   } catch (error) {
     console.error('GetMyRequests error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to get my requests', ...(process.env.NODE_ENV === 'development' && { error: error.message }) });
@@ -179,8 +237,15 @@ const getMyRequests = async (req, res) => {
 const getRequestById = async (req, res) => {
   try {
     const { id } = req.params;
-    const request = await Request.findById(id).populate('customer', 'name phone city profilePicture rating reviews').populate('acceptedOffer').populate('acceptedProvider', 'name phone category rating profilePicture');
+    let request = await Request.findById(id).populate('customer', 'name phone city profilePicture rating reviews').populate('acceptedOffer').populate('acceptedProvider', 'name phone category rating profilePicture');
     if (!request) return res.status(404).json({ status: 'error', message: 'Request not found' });
+
+    // Lazy expiry touch (Part 2)
+    request = await expireRequestIfStale(request, req.app.get('io'));
+    // Re-populate customer fields if the doc was flipped (save() keeps refs, this is a safety no-op)
+    if (request.cancelledReason === 'expired') {
+      await request.populate('customer', 'name phone city profilePicture rating reviews');
+    }
     const isOwner = request.customer._id.toString() === req.user.id.toString();
     let hasOffered = false;
     if (!isOwner) {
@@ -201,6 +266,8 @@ const getRequestById = async (req, res) => {
         address: request.address,
         city: request.city,
         status: request.status,
+        cancelledReason: request.cancelledReason,
+        expiresAt: request.expiresAt,
         acceptedOffer: request.acceptedOffer,
         acceptedProvider: request.acceptedProvider,
         createdAt: request.createdAt,
@@ -221,6 +288,7 @@ const cancelRequest = async (req, res) => {
     if (!request) return res.status(404).json({ status: 'error', message: 'Request not found or not owned by you' });
     if (request.status !== 'pending') return res.status(400).json({ status: 'error', message: `Cannot cancel request with status ${request.status}. Only pending requests can be cancelled.`, currentStatus: request.status });
     request.status = 'cancelled';
+    request.cancelledReason = 'customer'; // Part 2: distinguish user-initiated cancel from auto-expiry
     await request.save();
     await Offer.updateMany({ request: id, status: 'pending' }, { $set: { status: 'rejected' } });
     try {
@@ -254,8 +322,15 @@ const directAccept = async (req, res) => {
 
     if (!providerId) return res.status(400).json({ status: 'error', message: 'providerId is required' });
 
-    const request = await Request.findById(requestId);
+    let request = await Request.findById(requestId);
     if (!request) return res.status(404).json({ status: 'error', message: 'Request not found' });
+
+    // Lazy expiry touch (Part 2): booking on a stale request is impossible after this line
+    request = await expireRequestIfStale(request, req.app.get('io'));
+    if (request.status === 'cancelled' && request.cancelledReason === 'expired') {
+      return res.status(400).json({ status: 'error', message: 'This request expired (no offer was accepted in time). Please post it again.', code: 'REQUEST_EXPIRED', cancelledReason: 'expired' });
+    }
+
     if (request.customer.toString() !== req.user.id.toString()) return res.status(403).json({ status: 'error', message: 'Only request owner can directly accept providers' });
     if (request.status !== 'pending') return res.status(400).json({ status: 'error', message: `Request is no longer pending. Current status: ${request.status}`, currentStatus: request.status });
 

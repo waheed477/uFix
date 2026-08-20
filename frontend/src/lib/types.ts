@@ -62,7 +62,7 @@ export interface Offer {
  * so a provider can see the live fate of every offer without a refresh:
  * pending (waiting on customer) → accepted / declined / not selected / request cancelled.
  */
-export type SentOfferStatus = "pending" | "accepted" | "declined" | "rejected" | "cancelled";
+export type SentOfferStatus = "pending" | "accepted" | "declined" | "rejected" | "cancelled" | "expired";
 
 export interface SentOffer {
   id: string;
@@ -109,6 +109,10 @@ export interface Job {
   rating?: number;
   review?: string;
   fee?: string;
+  /** 'customer' = user-initiated cancel, 'expired' = auto-expired after 20 min pending (Availability & Expiry pass) */
+  cancelledReason?: 'customer' | 'expired' | string;
+  /** ms timestamp - only while the request is pending */
+  expiresAt?: number;
 }
 
 /* Category config - Real, not mock */

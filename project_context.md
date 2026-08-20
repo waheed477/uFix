@@ -198,11 +198,42 @@ A completion/polish pass on the core job lifecycle so BOTH sides see each other'
 
 **Verification (automated two-session E2E, 48/48 PASS):** request:new to matching provider → edited-price offer (550) → decline (403 guard for provider role, 400 on re-decline, request stays pending) → offer:declined targeted to that provider only + persisted offer_declined bell entry → second offer 500 revived (customer sees 2 pending incl. provider B's) → accept → offer:accepted to A / offer:rejected to B / job created on_the_way / GET /api/jobs/:id shows provider name+rating+phone + contactUnlocked → status arrived→in_progress live each side → backward 400 → completed to BOTH → both rate (duplicate 400, avg aggregated 5.0/1) → new_rating live + persisted on both → completed job in BOTH order histories → 2nd request → offer → cancel → request:cancelled + persisted request_cancelled + no dangling pending offers + cancelled entry in customer history.
 
+## Provider Availability Lock & Request Expiry (2026-08-20) - Refinement Pass
+
+Two targeted improvements on top of the bidirectional pass, both verified with an automated two-session E2E (`backend/tests/e2e-availability-expiry.js`, **39/39 checks PASS**) + the previous 48/48 regression suite re-run green.
+
+### Part 1 - Provider Availability Lock (one job at a time)
+A provider with an **active Job** (any status except `completed`) is BUSY. Test: `Job.findOne({ provider, status: { $ne: 'completed' } })`.
+
+**Approach CHOSEN (UI/UX decision, documented):** busy providers are hidden from new MATCHES server-side (GET `/api/requests/nearby` returns exactly zero requests + `hasActiveJob: true`) AND the frontend shows a calm banner — instead of visible-but-disabled request cards. Why: seeing offers you can't act on is worse than not seeing them; server is the source of truth (mirrors `createOffer`'s enforcement), so a busy provider can never sneak an offer through another client. The provider intentionally **stays online** (live tracking of the active job must not break); only new-match eligibility is gated. Lock **releases automatically** when the job completes.
+
+**Enforcement points (backend):**
+- `createOffer` → `400 { code: 'PROVIDER_BUSY', hasActiveJob: true, message: 'You have an active job in progress. Complete it before sending new offers.' }` (directAccept already had its own busy guard — consistent now).
+- `createRequest` socket fan-out + persisted `request_new` notifications EXCLUDE busy providers (verified: busy A got nothing, free B notified).
+- `GET /api/requests/nearby` → busy provider gets `requests: [], count: 0, hasActiveJob: true, activeJobStatus` (verified; after completion, hasActiveJob false + previously-hidden requests visible again).
+- `GET /api/providers/available` (customer "bookable" list) **excludes busy providers** via `Job.distinct('provider', { status: { $ne: 'completed' } })` — no dead "Book Now" buttons.
+
+**Frontend:** `store.providerBusy` synced from nearby responses / offer:accepted / job completed / 400-hasActiveJob; ProviderHome shows an amber `🔒 You have an active job` banner (+ "View job" deep-link) and REPLACES the request list with a focus-mode empty state while busy. `request:new` events are also ignored client-side while busy (belt-and-suspenders behind the server filter).
+
+### Part 2 - Auto-Expiry (pending requests expire after 20 minutes)
+- Model: `Request.expiresAt` (default `createdAt + REQUEST_EXPIRY_MINUTES`) + `Request.cancelledReason` (`'customer' | 'expired'`, distinguishes Expired vs Cancelled in history/UI).
+- Constant: `utils/requestConfig.js` exports `REQUEST_EXPIRY_MINUTES = 20` (single named constant, tune here only; no-dep module to avoid Request-model require cycles).
+- **DESIGN DECISION — lazy-check-on-read, NO cron/background scheduler** (deliberate, same philosophy as the documented no-Redis choice): at this project's scale (<20 concurrent users) a scheduler adds a second moving part and in-process timers don't survive restarts — for zero user-visible gain. Instead, `utils/requestExpiry.js` (`expireRequestIfStale` + `expireStalePendingRequests`) flips stale pending requests the first time anything touches them. Every endpoint that reads or acts on a pending request checks `expiresAt` first, so an expired request can NEVER be offered on or accepted, never appears in nearby lists, and shows as Expired in history — the outcome is identical from every user's perspective, just triggered on the next read instead of a timer tick.
+- Touchpoints wired: `createOffer`, `getOffersForRequest`, `acceptOffer` (explicit `400 REQUEST_EXPIRED` branch when accept is the first read), `declineOffer`, `getNearbyRequests` (scoped sweep), `getMyRequests` (customer sweep), `getRequestById`, `directAccept`.
+- Expiry side effects = the same shape as the customer-cancel flow: offers still pending → `rejected`; **distinct** socket event `request:expired` + notification type `request_expired` (clearer semantics than reusing `request:cancelled` — chosen deliberately, added to the enum) to the customer + every provider who offered; nearby NON-offering providers get the lightweight `request:closed` (same pattern the accept flow uses) so stale cards drop.
+- **DEV-ONLY test hook:** `POST /api/requests` accepts `expiresInMinutes` (0 < n ≤ 60) to force a short expiry for testing — ignored in production and NOT a UI feature (avoids manual DB pokes; the 39-check E2E uses a 3-second expiry).
+- `GET /api/jobs/history` carries `cancelledReason` → History/JobCard render `⏰ Expired` (amber pill) instead of grey `Cancelled` when reason is `expired`.
+
+**Frontend (small cues only, design preserved):** types/adapters carry `cancelledReason` + `expiresAt`; store handles `request:expired` (customer: request flips to Expired + toast; provider: card removed + their offer badge → `⏰ Request expired`); JobsTab + OffersScreen show an "Expired — no providers responded in time" state with a **Post again** action; NotificationBell icons for `request_expired`.
+
+**Verification (E2E 39/39 PASS):** busy A hidden from fan-out + nearby (hasActiveJob true, count 0) + 400 PROVIDER_BUSY on offer with correct message + excluded from /providers/available; free B sees+offers; lock releases on completion; default expiry ≈20 min & junk override (999) ignored; 3-second expiry flips on customer read with `cancelledReason:'expired'` + request:expired to BOTH customer & offering provider + persisted request_expired bell entries; pending offer auto-rejected; accept-after-expiry 400 (incl. the explicit REQUEST_EXPIRED first-read branch on request W); expired request in cancelled history with reason; absent from nearby exactly.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
+- [x] Provider Availability Lock & Request Expiry pass - verified 39/39 E2E (2026-08-20)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional
-- [ ] Future: Google Places Autocomplete, Directions, Distance Matrix, request expiry auto-cancel after 15 min, provider busy check (one active job), price editable in profile edit
+- [ ] Future: Google Places Autocomplete, Directions, Distance Matrix, price editable in profile edit
 
 ## Notes
 - Site fully functional end-to-end, two real users (customer + provider) can complete entire journey: signup with city, request with area name, offer with distance-based price PKR, accept, contact unlock tel:, status timeline live, live location both ways on map, chat real-time, rating, history, notifications, city-based filtering (plumber request -> only plumbers same city)

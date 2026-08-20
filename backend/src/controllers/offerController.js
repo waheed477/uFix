@@ -4,6 +4,7 @@ const Offer = require('../models/Offer');
 const User = require('../models/User');
 const Job = require('../models/Job');
 const { createNotification } = require('../utils/notify');
+const { expireRequestIfStale } = require('../utils/requestExpiry');
 
 /**
  * Offer Controller - Phase 4 Core Business Logic
@@ -111,7 +112,7 @@ const createOffer = async (req, res) => {
     }
 
     // Get request
-    const request = await Request.findById(requestId);
+    let request = await Request.findById(requestId);
 
     if (!request) {
       return res.status(404).json({
@@ -119,6 +120,10 @@ const createOffer = async (req, res) => {
         message: 'Request not found'
       });
     }
+
+    // Lazy expiry touch (Availability & Expiry pass Part 2): a pending request past its
+    // expiresAt flips to cancelled('expired') right here before any offer logic runs.
+    request = await expireRequestIfStale(request, req.app.get('io'));
 
     // Check request status pending
     if (request.status !== 'pending') {
@@ -141,6 +146,21 @@ const createOffer = async (req, res) => {
           requestCategory: request.category
         });
       }
+    }
+
+    // Provider Availability Lock (Part 1): a provider with an ACTIVE job (any status except
+    // 'completed') cannot send new offers. One job at a time - same rule directAccept already
+    // enforces for the discovery model. Frontend keys off `hasActiveJob`.
+    const activeJob = await Job.findOne({ provider: req.user.id, status: { $ne: 'completed' } }).select('status request');
+    if (activeJob) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'You have an active job in progress. Complete it before sending new offers.',
+        code: 'PROVIDER_BUSY',
+        hasActiveJob: true,
+        activeJobId: activeJob._id,
+        activeJobStatus: activeJob.status
+      });
     }
 
     // Check duplicate offer (compound index also enforces, but check for clear message)
@@ -333,6 +353,10 @@ const getOffersForRequest = async (req, res) => {
       });
     }
 
+    // Lazy expiry touch (Part 2): customer polling offers flips a stale request to
+    // cancelled('expired') - response carries requestStatus so the frontend reacts
+    await expireRequestIfStale(request, req.app.get('io'));
+
     const offers = await Offer.find({ request: requestId })
       .populate('provider', 'name phone category rating reviews profilePicture isVerified isOnline city yearsExperience')
       .sort({ createdAt: -1 });
@@ -342,6 +366,7 @@ const getOffersForRequest = async (req, res) => {
       count: offers.length,
       requestId,
       requestStatus: request.status,
+      cancelledReason: request.cancelledReason || null,
       offers: offers.map(o => ({
         id: o._id,
         provider: o.provider,
@@ -407,6 +432,19 @@ const acceptOffer = async (req, res) => {
       return res.status(403).json({
         status: 'error',
         message: 'Access denied. Only request owner can accept offers.'
+      });
+    }
+
+    // Lazy expiry touch (Part 2): accepting after the request's expiresAt flips it to
+    // cancelled('expired') first - the offer can then no longer be accepted
+    await expireRequestIfStale(request, req.app.get('io'));
+    if (request.status === 'cancelled' && request.cancelledReason === 'expired') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'This request expired (no offer was accepted in time). The customer can post it again.',
+        code: 'REQUEST_EXPIRED',
+        currentStatus: 'cancelled',
+        cancelledReason: 'expired'
       });
     }
 
@@ -700,6 +738,10 @@ const declineOffer = async (req, res) => {
         message: 'Access denied. Only the request owner can decline offers.'
       });
     }
+
+    // Lazy expiry touch (Part 2) - declining on a stale request flips it first; the
+    // status checks below then report it correctly as settled
+    await expireRequestIfStale(request, req.app.get('io'));
 
     // Only pending offers can be declined (accepted/already-rejected are terminal)
     if (offer.status !== 'pending') {
