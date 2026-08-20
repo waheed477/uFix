@@ -68,6 +68,7 @@ import {
   offsetToCoords,
   getCityCoords,
   getCityByName,
+  findNearestCity,
   PAKISTAN_CITIES,
 } from "./location";
 import { api, getToken, setToken, setStoredUser, getStoredUser, clearAuth } from "./api";
@@ -141,7 +142,7 @@ interface AppContextValue {
   // auth - real backend
   completeAuth: (role: Role, name: string, phone: string, city?: string) => void; // kept for compatibility, but now does real logic via login
   completeProviderSetup: (category: Category, radiusKm: number) => void;
-  updateProfile: (name: string, phone: string) => void;
+  updateProfile: (name: string, phone: string, city?: string) => void;
   toggleOnline: () => void;
   logout: () => void;
 
@@ -324,8 +325,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
               // Connect socket with existing token
               socketClient.connect();
 
-              // City-based map: if user has city and no GPS yet, set map to that city
-              if (backendUser.city && location.status === 'idle') {
+              // Post-Audit Fix P2: the BACKEND is the source of truth for location on restore.
+              // Previously this block reset the location to the city CENTER on every reload and
+              // PATCHed it back - destroying any precise GPS/dragged location - and the stale
+              // 'idle' closure then forced the LocationPermissionScreen on EVERY session.
+              const savedCoords = (backendUser as any).location?.coordinates as number[] | undefined;
+              const hasRealLocation =
+                Array.isArray(savedCoords) &&
+                savedCoords.length === 2 &&
+                !(savedCoords[0] === 0 && savedCoords[1] === 0);
+              if (hasRealLocation) {
+                const [slng, slat] = savedCoords!;
+                const cityName = (backendUser.city as string | undefined) || findNearestCity({ lat: slat, lng: slng })?.name;
+                const cityInfo = cityName ? getCityByName(cityName) : null;
+                setLocation({
+                  status: 'granted',
+                  coords: { lat: slat, lng: slng },
+                  address: cityInfo ? `${cityInfo.name}, ${cityInfo.region}` : (backendUser.city || DEFAULT_ADDRESS),
+                  city: cityInfo?.name || backendUser.city || DEFAULT_CITY,
+                  region: cityInfo?.region || DEFAULT_REGION,
+                  accuracy: null,
+                  custom: true,
+                });
+                console.log(`[Auth Restore] Trusted backend location [${slng},${slat}] city=${cityName || 'unknown'} - no overwrite`);
+                // NOTE: intentionally NO PATCH here - backend already holds this location.
+              } else if (backendUser.city) {
+                // No saved location yet (new user): pre-center the map on their city in STATE
+                // only (no backend write) - they still need to set a real location.
                 const cityCoords = getCityCoords(backendUser.city);
                 if (cityCoords) {
                   const cityInfo = getCityByName(backendUser.city);
@@ -338,19 +364,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     accuracy: null,
                     custom: true,
                   });
-                  console.log(`[Auth Restore] Set location from user city: ${backendUser.city} ->`, cityCoords);
-                  // Update backend location to city's coords
-                  api.users.updateLocation(cityCoords.lng, cityCoords.lat).catch(()=>{});
+                  console.log(`[Auth Restore] No saved location - pre-centering on city ${backendUser.city} (state only)`);
                 }
               }
-              
-              // Check if provider needs setup (missing category)
+
+              // Stage decision: provider setup first; a user WITH a real saved location skips
+              // the permission screen entirely (P2); only genuinely location-less users see it.
               if (frontendUser.role === 'provider' && !backendUser.category) {
                 setStage('providerSetup');
-              } else if (location.status === 'idle') {
-                setStage('location');
-              } else {
+              } else if (hasRealLocation) {
                 setStage('app');
+              } else {
+                setStage('location');
               }
             }
           } catch (err) {
@@ -768,68 +793,98 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addr = { address, city, region };
       } catch {}
       
+      // Post-Audit Fix P3 (consistency): the MATCHING layer filters on the Pakistan-cities
+      // vocabulary (e.g. "Lahore"). Nominatim can return values like "Lahore District" or a
+      // suburb name - those would silently break city matching. Canonicalize the city to the
+      // NEAREST city in our DB while keeping the geocoded address as the display label.
+      const nearestCity = findNearestCity(coords);
+      const canonicalCity = nearestCity?.name || addr.city;
+      const canonicalRegion = nearestCity?.region || addr.region;
+
       const next: Loc = {
         status: 'granted',
         coords,
         address: addr.address,
-        city: addr.city,
-        region: addr.region,
+        city: canonicalCity,
+        region: canonicalRegion,
         accuracy,
         custom: false,
       };
       setGps(next);
       setLocation(next);
+      // Keep the user record's city in sync with the detected real city
+      if (user && canonicalCity && user.city !== canonicalCity) {
+        setUser(prev => prev ? { ...prev, city: canonicalCity } : prev);
+        const stored = getStoredUser();
+        if (stored) setStoredUser({ ...stored, city: canonicalCity });
+      }
 
-      // Also send to backend for geospatial queries (Phase 3 + Phase 9)
+      // Also send to backend for geospatial queries (Phase 3 + Phase 9).
+      // Post-Audit Fix P3: send the reverse-geocoded city in the SAME call so DB
+      // user.city and stored coordinates never represent different places.
       try {
-        await api.users.updateLocation(coords.lng, coords.lat);
-        console.log('[Location] Updated backend with lng,lat', coords.lng, coords.lat);
+        await api.users.updateLocation(coords.lng, coords.lat, canonicalCity);
+        console.log('[Location] Updated backend with lng,lat,city', coords.lng, coords.lat, canonicalCity);
       } catch (e) {
         console.warn('[Location] Failed to update backend location', e);
       }
 
       if (user?.role === 'provider') showToast("You're live — ready to receive requests!", 'check');
     } catch {
-      // Even on denial, set frontend to DEFAULT and ALSO update backend to avoid [0,0] bug
+      // Post-Audit Fix P1: GPS denied/timed out -> fall back to the coordinates of the
+      // user's ALREADY-SELECTED city (Pakistan cities DB), NOT the hardcoded
+      // DEFAULT_COORDS (Faisalabad). Previously this clobbered e.g. a Lahore user's
+      // location both in state AND in the backend, desyncing DB city from stored coords.
+      const fallbackCityName = user?.city || location.city;
+      const cityCoords = fallbackCityName ? getCityCoords(fallbackCityName) : null;
+      const cityInfo = fallbackCityName ? getCityByName(fallbackCityName) : null;
+      const fallback = cityCoords && cityInfo
+        ? { coords: cityCoords, address: `${cityInfo.name}, ${cityInfo.region}`, city: cityInfo.name, region: cityInfo.region }
+        : { coords: DEFAULT_COORDS, address: DEFAULT_ADDRESS, city: DEFAULT_CITY, region: DEFAULT_REGION };
       setGps(null);
       setLocation({
         status: 'denied',
-        coords: DEFAULT_COORDS,
-        address: DEFAULT_ADDRESS,
-        city: DEFAULT_CITY,
-        region: DEFAULT_REGION,
+        coords: fallback.coords,
+        address: fallback.address,
+        city: fallback.city,
+        region: fallback.region,
         accuracy: null,
         custom: false,
       });
 
-      // CRITICAL FIX: Update backend even when GPS denied - prevents [0,0] geospatial failure
       try {
-        await api.users.updateLocation(DEFAULT_COORDS.lng, DEFAULT_COORDS.lat);
-        console.log('[Location] GPS denied - set backend to DEFAULT_COORDS', DEFAULT_COORDS);
+        await api.users.updateLocation(fallback.coords.lng, fallback.coords.lat, fallback.city);
+        console.log(`[Location] GPS denied - fell back to selected city "${fallback.city}" coords`, fallback.coords);
       } catch (e) {
-        console.warn('[Location] Failed to set default backend location', e);
+        console.warn('[Location] Failed to set fallback backend location', e);
       }
     } finally {
       setStage(s => (s === 'location' ? 'app' : s));
     }
-  }, [user]);
+  }, [user, location.city, showToast]);
 
   const skipLocation = useCallback(() => {
+    // Post-Audit Fix P1: "skip" means "use my selected city" - NOT hardcoded Faisalabad.
+    const fallbackCityName = user?.city || location.city;
+    const cityCoords = fallbackCityName ? getCityCoords(fallbackCityName) : null;
+    const cityInfo = fallbackCityName ? getCityByName(fallbackCityName) : null;
+    const fallback = cityCoords && cityInfo
+      ? { coords: cityCoords, address: `${cityInfo.name}, ${cityInfo.region}`, city: cityInfo.name, region: cityInfo.region }
+      : { coords: DEFAULT_COORDS, address: DEFAULT_ADDRESS, city: DEFAULT_CITY, region: DEFAULT_REGION };
     setLocation({
       status: 'denied',
-      coords: DEFAULT_COORDS,
-      address: DEFAULT_ADDRESS,
-      city: DEFAULT_CITY,
-      region: DEFAULT_REGION,
+      coords: fallback.coords,
+      address: fallback.address,
+      city: fallback.city,
+      region: fallback.region,
       accuracy: null,
       custom: false,
     });
-    // CRITICAL FIX: Also update backend on skip to avoid [0,0]
-    api.users.updateLocation(DEFAULT_COORDS.lng, DEFAULT_COORDS.lat)
-      .then(() => console.log('[Location] Skipped - set backend to DEFAULT_COORDS'))
-      .catch(e => console.warn('[Location] Failed to set default on skip', e));
+    api.users.updateLocation(fallback.coords.lng, fallback.coords.lat, fallback.city)
+      .then(() => console.log(`[Location] Skipped - set backend to selected city "${fallback.city}" coords`))
+      .catch(e => console.warn('[Location] Failed to set fallback on skip', e));
     setStage('app');
-  }, []);
+  }, [user, location.city]);
 
   const searchLocation = useCallback((p: { coords: Coords; label: string; city: string; region: string }) => {
     const newLoc: Loc = {
@@ -843,15 +898,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     setLocation(newLoc);
 
-    // Also send to backend
-    api.users.updateLocation(p.coords.lng, p.coords.lat).catch(e => console.warn('Failed to update backend location via search', e));
+    // Post-Audit Fix P3: keep the user record's city in sync too (UI, asks, toasts) and send
+    // coords+city in ONE atomic PATCH (backend updates both fields with a single $set).
+    setUser(prev => (prev ? { ...prev, city: newLoc.city } : prev));
+    const stored = getStoredUser();
+    if (stored) setStoredUser({ ...stored, city: newLoc.city });
+
+    api.users.updateLocation(p.coords.lng, p.coords.lat, newLoc.city)
+      .catch(e => console.warn('Failed to update backend location via search', e));
   }, []);
 
   const resetLocation = useCallback(() => {
     if (gps) {
       setLocation({ ...gps, status: 'granted', custom: false });
       if (gps.coords) {
-        api.users.updateLocation(gps.coords.lng, gps.coords.lat).catch(e => console.warn('Failed to reset backend location', e));
+        api.users.updateLocation(gps.coords.lng, gps.coords.lat, gps.city).catch(e => console.warn('Failed to reset backend location', e));
       }
     } else {
       requestLocation();
@@ -874,8 +935,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       setLocation(newLoc);
       console.log(`[Location] Set from city ${cityName} ->`, coords);
-      // Update backend for geospatial queries
-      api.users.updateLocation(coords.lng, coords.lat).catch(e => console.warn('Failed to update backend city location', e));
+      // Post-Audit P3: sync user.city in state + same atomic PATCH (coords+city together)
+      setUser(prev => (prev ? { ...prev, city: cityInfo.name } : prev));
+      const stored = getStoredUser();
+      if (stored) setStoredUser({ ...stored, city: cityInfo.name });
+      api.users.updateLocation(coords.lng, coords.lat, cityInfo.name).catch(e => console.warn('Failed to update backend city location', e));
       return true;
     }
     console.warn(`[Location] City not found: ${cityName}`);
@@ -979,22 +1043,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const updateProfile = useCallback(async (name: string, phone: string) => {
+  const updateProfile = useCallback(async (name: string, phone: string, city?: string) => {
     try {
       setLoading('profile', true);
-      await api.users.updateProfile({ name, city: undefined }); // phone is not updatable via this endpoint per backend, but we try name only
+      // Post-Audit Fix P4: city is editable now. Backend PATCH /api/users/profile accepts city.
+      const cityTrimmed = city?.trim();
+      const willChangeCity = !!cityTrimmed && cityTrimmed !== user?.city;
+      await api.users.updateProfile(willChangeCity ? { name, city: cityTrimmed } : { name });
       // Note: phone update not supported via PATCH /api/users/profile per backend (only name, city, profilePicture, isOnline)
       // So we only update name locally
-      setUser(prev => prev ? { 
-        ...prev, 
-        name, 
+      setUser(prev => prev ? {
+        ...prev,
+        name,
         phone,
-        avatar: name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase() 
+        ...(willChangeCity ? { city: cityTrimmed } : {}),
+        avatar: name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()
       } : prev);
-      
+
       const stored = getStoredUser();
       if (stored) {
-        setStoredUser({ ...stored, name, phone });
+        setStoredUser({ ...stored, name, phone, ...(willChangeCity ? { city: cityTrimmed } : {}) });
+      }
+
+      // City change => move the map + stored coordinates in ONE atomic location PATCH (P3 pattern),
+      // so matching immediately follows the new city after reload.
+      if (willChangeCity) {
+        const coords = getCityCoords(cityTrimmed!);
+        const cityInfo = getCityByName(cityTrimmed!);
+        if (coords && cityInfo) {
+          setLocation({
+            status: 'granted',
+            coords,
+            address: `${cityInfo.name}, ${cityInfo.region}`,
+            city: cityInfo.name,
+            region: cityInfo.region,
+            accuracy: null,
+            custom: true,
+          });
+          api.users.updateLocation(coords.lng, coords.lat, cityInfo.name)
+            .catch(e => console.warn('Failed to move backend location after city change', e));
+        }
       }
 
       showToast('Profile updated', 'check');
@@ -1004,7 +1092,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading('profile', false);
     }
-  }, []);
+  }, [user]);
 
   const toggleOnline = useCallback(async () => {
     if (!user) return;

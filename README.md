@@ -38,6 +38,26 @@
 Backend: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET, GOOGLE_CLIENT_ID, OTP_EXPIRY_MINUTES, CLOUDINARY_CLOUD_NAME/KEY/SECRET, ADMIN_SECRET
 Frontend: VITE_API_URL (http://localhost:5000), VITE_SOCKET_URL (http://localhost:5000) - no hardcoded localhost:5000 in code, all via env, .env.example provided
 
+## Local Development Setup (POST-AUDIT - READ THIS FIRST)
+There are two ways to run the backend locally - do NOT mix them up:
+
+1. **Sandbox/quick testing (recommended for trying the app):** `cd backend && npm install && node dev-inmemory.js`
+   This starts the REAL server with an in-memory MongoDB (mongodb-memory-server) and injects
+   a dev JWT_SECRET - nothing to configure, but data is wiped on restart. It is a legitimate
+   testing tool, clearly NOT the production path.
+
+2. **Real run path (`npm start` = `node src/server.js`):** used for real local testing with a
+   persistent DB, and it mirrors how the app will run on Render. It **REQUIRES** a real
+   `backend/.env` created from `backend/.env.example`:
+   - `MONGO_URI` = your real MongoDB Atlas connection string (the file contains only a placeholder)
+   - `JWT_SECRET` = a real 64-hex string
+   If `MONGO_URI` is missing or unreachable, the backend now **fails fast with a loud fatal
+   error and non-zero exit** instead of starting and hanging every request (10s buffering
+   timeouts). Escape hatch for health-check-only runs: `ALLOW_NO_DB=true npm start`.
+
+Deployment (Render etc.): set the same real env vars in the host's environment settings;
+`npm start` is the run command. The app will refuse to boot misconfigured - by design.
+
 ## Folder Structure (Simplified)
 ```
 uFix/

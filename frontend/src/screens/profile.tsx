@@ -17,7 +17,7 @@ import {
   WalletIcon,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import { getCityByName } from "@/lib/location";
+import { getCityByName, getAllCities } from "@/lib/location";
 
 function MenuItem({
   icon,
@@ -198,11 +198,15 @@ export function ProfileTab() {
 }
 
 export function EditProfileScreen() {
-  const { user, updateProfile, back } = useApp();
+  const { user, updateProfile, back, location } = useApp();
   const [name, setName] = useState(user?.name ?? "");
   const [phone, setPhone] = useState(user?.phone ?? "");
+  // Post-Audit Fix P4: city is now editable here (same Pakistan-cities vocabulary as onboarding)
+  const [city, setCity] = useState(user?.city ?? location.city ?? "");
   const isProvider = user?.role === "provider";
   const meta = user?.category ? categoryById(user.category) : null;
+  const allCities = useMemo(() => getAllCities(), []);
+  const cityChanged = city !== (user?.city ?? "");
 
   return (
     <div className="flex h-full flex-col bg-ink-50">
@@ -230,6 +234,24 @@ export function EditProfileScreen() {
             <label className="mb-1.5 block text-sm font-semibold text-ink-700">Phone number</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" className="h-14 w-full rounded-2xl border-2 border-ink-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500" />
           </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-semibold text-ink-700">City</label>
+            <select
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              className="h-14 w-full rounded-2xl border-2 border-ink-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500"
+            >
+              {!allCities.some(c => c.name === city) && city && <option value={city}>{city}</option>}
+              {allCities.map(c => (
+                <option key={c.name} value={c.name}>{c.name} · {c.province}</option>
+              ))}
+            </select>
+            {cityChanged && (
+              <p className="mt-1.5 text-[11px] text-ink-400">
+                Saving will move your map + matching to <span className="font-semibold text-ink-700">{city}</span> (coordinates update automatically).
+              </p>
+            )}
+          </div>
           {isProvider && meta && (
             <div className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white p-4">
               <CategoryIcon category={meta.id} size={44} soft />
@@ -244,7 +266,7 @@ export function EditProfileScreen() {
       </div>
 
       <div className="border-t border-ink-100 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button full size="lg" disabled={!name.trim()} onClick={() => { updateProfile(name.trim(), phone.trim()); back(); }}>
+        <Button full size="lg" disabled={!name.trim() || !city.trim()} onClick={() => { updateProfile(name.trim(), phone.trim(), city.trim()); back(); }}>
           Save changes
         </Button>
       </div>

@@ -1,26 +1,41 @@
+import { useEffect, useRef } from "react";
 import { useApp } from "@/lib/store";
-import { DEFAULT_ADDRESS } from "@/lib/location";
+import { DEFAULT_CITY } from "@/lib/location";
 import { Button, ClockIcon, LocateIcon, MapPinIcon } from "@/components/ui";
 
 export function LocationPermissionScreen() {
-  const { requestLocation, skipLocation, location } = useApp();
+  const { requestLocation, skipLocation, location, user } = useApp();
   const requesting = location.status === "requesting";
+
+  // Post-Audit Decision 6: inDrive-style AUTO-PROMPT. The friendly explanation is already
+  // on screen; shortly after mount the native browser permission prompt fires automatically.
+  // The button remains as a retry/fallback action (browsers ignore duplicate concurrent
+  // geolocation calls, and re-prompting is allowed if the user didn't hard-block).
+  const autoPromptFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoPromptFiredRef.current) return;
+    autoPromptFiredRef.current = true;
+    const t = window.setTimeout(() => requestLocation(), 700);
+    return () => window.clearTimeout(t);
+  }, [requestLocation]);
+
+  const fallbackCity = user?.city || location.city || DEFAULT_CITY;
 
   const bullets = [
     {
       Icon: LocateIcon,
       title: "See pros near you",
-      desc: "Get real-time offers from providers around your live location.",
+      desc: "Get real-time offers from providers in your city area.",
     },
     {
       Icon: ClockIcon,
-      title: "Accurate arrival times",
-      desc: "ETAs and distances are calculated from where you actually are.",
+      title: "Faster arrival estimates",
+      desc: "ETAs and distances are estimated from your city area.",
     },
     {
       Icon: MapPinIcon,
-      title: "Drop an exact pin",
-      desc: "Fine-tune your location by dragging the pin on the map.",
+      title: "Pin your area",
+      desc: "Drag the pin on our stylized area view (free map - not a precise street map).",
     },
   ];
 
@@ -81,11 +96,14 @@ export function LocationPermissionScreen() {
             "Enable location"
           )}
         </Button>
+        <p className="mt-2 text-center text-[11px] text-ink-400">
+          Your browser should ask for location permission automatically — allow it for the best matches.
+        </p>
         <button
           onClick={skipLocation}
           className="mt-3 w-full text-center text-sm font-semibold text-ink-400 transition-colors hover:text-ink-600"
         >
-          Use {DEFAULT_ADDRESS.split(",")[0]} by default
+          Use my city: {fallbackCity}
         </button>
       </div>
     </div>

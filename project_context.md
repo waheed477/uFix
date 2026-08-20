@@ -228,12 +228,40 @@ A provider with an **active Job** (any status except `completed`) is BUSY. Test:
 
 **Verification (E2E 39/39 PASS):** busy A hidden from fan-out + nearby (hasActiveJob true, count 0) + 400 PROVIDER_BUSY on offer with correct message + excluded from /providers/available; free B sees+offers; lock releases on completion; default expiry ≈20 min & junk override (999) ignored; 3-second expiry flips on customer read with `cancelledReason:'expired'` + request:expired to BOTH customer & offering provider + persisted request_expired bell entries; pending offer auto-rejected; accept-after-expiry 400 (incl. the explicit REQUEST_EXPIRED first-read branch on request W); expired request in cancelled history with reason; absent from nearby exactly.
 
+## Location System Fixes — Post-Audit (2026-08-20)
+
+Fixes for CONFIRMED bugs from the full code audit (audit report separately issued). Each verified live; regression suites re-run green after all of them (48/48 + 39/39 + 12/12).
+
+### P1 - GPS deny/timeout no longer clobbers the selected city (store.tsx requestLocation + skipLocation)
+Before: on deny/timeout/skip the code hardcoded DEFAULT_COORDS (Faisalabad) in state AND PATCHed it to the backend, while DB `city` kept e.g. "Lahore" -> silent desync. Now: fallback = coordinates of the user's ALREADY-SELECTED city via `getCityCoords(user.city || location.city)`; DEFAULT_COORDS only if no city is known. Skip button label is now dynamic ("Use my city: Lahore") instead of the hardcoded "Use Model Town by default" (location.tsx).
+
+### P2 - Auth restore trusts the backend (no more per-reload reset + re-prompt)
+Before: every reload reset the location to the city CENTER, PATCHed it back (destroying precise GPS/dragged locations), and the stale 'idle' closure forced the LocationPermissionScreen every session. Now: if GET /api/users/profile returns a real saved location (not [0,0]), restore sets frontend state FROM it, writes NOTHING back, and skips straight to the app (`setStage('app')`). The permission screen is only shown to genuinely location-less users (new accounts). City pre-centering still happens in STATE only, without the destructive PATCH.
+
+### P3 - Single source of truth: city + coordinates now update atomically
+Backend `PATCH /api/users/location` accepts an optional `city` field and `$set`s it in the SAME update as the GeoJSON point (others 400-validated). ALL frontend location-changing paths now pass city in that one call: requestLocation (granted: canonicalized to the NEAREST Pakistan-cities city so Nominatim variants like "Lahore District" can't break the matching vocabulary; deny/timeout: P1 fallback city), skipLocation, searchLocation (PlaceSearch), setLocationFromCity, resetLocation. User state + storedUser city also synced on client. Live test (`tests/fix-p3-city-sync.js`, 6/6): Lahore user switched to Karachi in one PATCH -> profile shows city=Karachi AND coords=Karachi -> a Karachi request immediately reached the Karachi provider and NOT the Lahore provider.
+
+### P4 - City is editable in Edit Profile
+Before: updateProfile hardcoded city:undefined and the profile "City & Area" card was display-only. Now: Edit Profile has a city dropdown (getAllCities from the Pakistan DB, same vocabulary as onboarding), saving PATCHes user.city AND moves the map + coordinates via the same atomic location PATCH (P3 pattern). Live test: city persisted after fresh profile GET, coords+city consistent.
+
+### P5 - Backend fails FAST without a real DB (deployment blocker removed)
+Before: `npm start` with no .env started successfully and every request hung 10s (mongoose buffering timeout) - exactly what Render would do with a misconfigured env. Now `connectDB()` (config/db.js) logs a loud FATAL banner and exits(1) if MONGO_URI is missing or unreachable (serverSelectionTimeoutMS: 10s), with exact fix steps printed. Exceptions: NODE_ENV=test, or explicit `ALLOW_NO_DB=true` (health-check-only mode, still logs a loud warning). dev-inmemory.js behavior unchanged - it sets MONGO_URI itself (in-memory mongod). Verified live: missing URI -> immediate exit(1); unreachable URI -> FATAL checklist + exit(1); ALLOW_NO_DB=true -> stays up with warning. README + project_context.md gained a "Local Development Setup" section clearly separating dev-inmemory.js (sandbox) from npm start (real path).
+
+### Decision 6 - GPS auto-prompt implemented (inDrive-style)
+LocationPermissionScreen now auto-fires `requestLocation()` ~700ms after mount (fire-once ref guard); the friendly explanation is visible first, and the "Enable location" button remains as a retry/fallback. Combined with P2, auto-prompt only ever shows for genuinely new users. Verified in the built bundle (timer + guard present).
+
+### Decision 7 - Honest map copy
+Adjusted copy that implied geographic precision: LocationPermissionScreen bullets now say "city area" estimates and "stylized area view (free map - not a precise street map)"; permission hint text added. The Google Maps branch (GoogleMap.tsx + center={location.coords}) exists end-to-end and activates automatically when VITE_GOOGLE_MAPS_API_KEY is set - code-verified, not live-tested (no key available in this environment); documented here as the intentional free-tier fallback otherwise.
+
+**Verification:** P3 live suite 6/6, P4 live suite 3/3, P5 fatal tests 3/3 (missing/invalid/ALLOW_NO_DB), built-bundle assertions 6/6, and FULL regression: e2e-bidirectional 48/48 + e2e-availability-expiry 39/39 + audit-live-checks 12/12 - all PASS after these changes.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
 - [x] Provider Availability Lock & Request Expiry pass - verified 39/39 E2E (2026-08-20)
-- [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional
-- [ ] Future: Google Places Autocomplete, Directions, Distance Matrix, price editable in profile edit
+- [x] Location System Fixes - Post-Audit pass (P1-P5 + Decisions 6-7), regressions green (2026-08-20)
+- [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
+- [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 
 ## Notes
 - Site fully functional end-to-end, two real users (customer + provider) can complete entire journey: signup with city, request with area name, offer with distance-based price PKR, accept, contact unlock tel:, status timeline live, live location both ways on map, chat real-time, rating, history, notifications, city-based filtering (plumber request -> only plumbers same city)

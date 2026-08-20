@@ -267,7 +267,11 @@ const uploadProfilePicture = async (req, res) => {
  */
 const updateLocation = async (req, res) => {
   try {
-    const { lng, lat } = req.body;
+    const { lng, lat, city } = req.body;
+
+    // Post-Audit Fix P3: optional `city` updates user.city in the SAME atomic $set as the
+    // coordinates, so DB city and coordinates can never represent different places (matching
+    // - request fan-out, getNearbyRequests - filters on the user.city string).
 
     if (lng === undefined || lat === undefined) {
       return res.status(400).json({
@@ -304,16 +308,24 @@ const updateLocation = async (req, res) => {
       });
     }
 
+    if (city !== undefined && (typeof city !== 'string' || !city.trim() || city.trim().length > 100)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'city (when provided) must be a non-empty string under 100 characters'
+      });
+    }
+
+    const $set = {
+      location: {
+        type: 'Point',
+        coordinates: [parsedLng, parsedLat] // IMPORTANT: [lng, lat]
+      }
+    };
+    if (city !== undefined) $set.city = city.trim();
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
-      {
-        $set: {
-          location: {
-            type: 'Point',
-            coordinates: [parsedLng, parsedLat] // IMPORTANT: [lng, lat]
-          }
-        }
-      },
+      { $set },
       { new: true, runValidators: true }
     ).select('-__v');
 
@@ -339,6 +351,7 @@ const updateLocation = async (req, res) => {
       user: {
         id: user._id,
         name: user.name,
+        city: user.city,
         location: user.location
       }
     });
