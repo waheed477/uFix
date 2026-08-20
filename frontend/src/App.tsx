@@ -127,7 +127,25 @@ function ToastView({ toast }: { toast: { msg: string; icon: string } }) {
 
 function AppShell() {
   const { user, tab, screen, setTab, jobs, messages, toast } = useApp();
-  const isProvider = user?.role === "provider";
+
+  // Regression Fix (BUG B - 2026-08-20): NEVER render role-specific content while the
+  // session user is unresolved. A null user used to fall THROUGH the role gate below
+  // (isProvider === false), mounting CustomerHome - with its "Request a service"
+  // button - for providers. Root cause was onboarding logins that set token+stage but
+  // not the store's `user`; those are fixed to hydrate via completeAuth, and this
+  // guard makes a silent wrong-role home impossible here: worst case is a loader.
+  if (!user) {
+    return (
+      <div className="flex h-full items-center justify-center bg-ink-950">
+        <div
+          className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent"
+          aria-label="Loading your session"
+        />
+      </div>
+    );
+  }
+
+  const isProvider = user.role === "provider";
   const unread = conversationList(jobs, messages, user?.role).reduce((s, c) => s + c.unread, 0);
 
   const renderScreen = () => {

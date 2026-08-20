@@ -29,8 +29,6 @@ import {
   HomeIcon,
 } from "@/components/ui";
 import { api, setToken, setStoredUser, getToken } from "@/lib/api";
-import { adaptBackendUserToFrontendUser } from "@/lib/adapters";
-import { socketClient } from "@/lib/socket";
 import { PAKISTAN_CITIES, getCityCoords, searchPakistanCities, type PakistanCity } from "@/lib/location";
 
 /* ============================================================
@@ -144,7 +142,7 @@ function OtpBoxes({ value, onChange }: { value: string; onChange: (v: string) =>
 }
 
 export function AuthScreen() {
-  const { setStage, setDraftCategory, setLocationFromCity } = useApp() as any;
+  const { setDraftCategory, setLocationFromCity, completeAuth } = useApp() as any;
   const [step, setStep] = useState<AuthStep>("welcome");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -179,24 +177,18 @@ export function AuthScreen() {
       if (response.token && response.user) {
         setToken(response.token);
         setStoredUser(response.user);
-        socketClient.connect();
-        
-        const frontendUser = adaptBackendUserToFrontendUser(response.user);
-        // Use completeAuth-like logic: set user via stored user and go to appropriate stage
-        // We need to set user in store - we can use setStoredUser and then trigger stage change
-        // For simplicity, we set stage based on role
-        if (response.user.role === 'provider' && !response.user.category) {
-          setStage("providerSetup");
-        } else {
-          setStage("location");
-        }
-        // Store user will be restored on next mount, but we also need to set user in current store
-        // We will rely on store's restoration or we can force reload
-        // For now, set stage and let store's completeAuth handle user setting via localStorage
-        // Actually we need to set user in store's state - we can cheat by setting stored user and then calling completeAuth-like
-        // Since completeAuth reads from stored user, we set it and then set stage
-        // The store's completeAuth is kept for compatibility, but we will directly set stage and let next render fetch profile
         setDraftCategory((response.user.category as any) || 'plumber');
+        // Regression Fix (BUG B - 2026-08-20): completeAuth hydrates the store's `user`
+        // from the stored session AND routes to the right stage. Previously only
+        // token+stage were set, leaving `user` null - AppShell's role gate then fell
+        // through and mounted the CUSTOMER home for providers ("Request a service"
+        // button visible) until a full page reload.
+        completeAuth(
+          (response.user.role as Role) || 'customer',
+          response.user.name || name || 'User',
+          response.user.phone || phone,
+          (response.user.city as string | undefined) || city || undefined
+        );
       }
     } catch (err: any) {
       // Handle needsPhone, needsConfig, etc.
@@ -268,13 +260,16 @@ export function AuthScreen() {
         if (response.token && response.user) {
           setToken(response.token);
           setStoredUser(response.user);
-          socketClient.connect();
-
-          if (response.user.role === 'provider' && !response.user.category) {
-            setStage("providerSetup");
-          } else {
-            setStage("location");
-          }
+          // Regression Fix (BUG B - 2026-08-20): hydrate the store's `user` NOW via
+          // completeAuth (it also routes to providerSetup/location). Previously `user`
+          // stayed null in-session, so AppShell's role gate fell through and providers
+          // landed on the CUSTOMER home until a page reload.
+          completeAuth(
+            (response.user.role as Role) || 'customer',
+            response.user.name || name || 'User',
+            response.user.phone || phone,
+            response.user.city as string | undefined
+          );
           return;
         }
       } catch (err: any) {
@@ -305,7 +300,6 @@ export function AuthScreen() {
       if (response.token && response.user) {
         setToken(response.token);
         setStoredUser(response.user);
-        socketClient.connect();
         setDraftCategory((response.user.category as any) || 'plumber');
 
         // City-based map centering: agar user ne city select ki hai to map usi city ka khulega
@@ -318,11 +312,16 @@ export function AuthScreen() {
           }
         }
 
-        if (role === 'provider') {
-          setStage("providerSetup");
-        } else {
-          setStage("location");
-        }
+        // Regression Fix (BUG B - 2026-08-20): hydrate the store's `user` via
+        // completeAuth (also routes provider w/o category -> providerSetup, else ->
+        // location). Previously `user` stayed null in-session and providers fell
+        // through AppShell's role gate onto the CUSTOMER home until a reload.
+        completeAuth(
+          (response.user.role as Role) || role,
+          response.user.name || name.trim(),
+          response.user.phone || phone,
+          ((response.user.city as string | undefined) || city.trim() || undefined)
+        );
       }
     } catch (err: any) {
       setError(err.message || 'Failed to complete registration');

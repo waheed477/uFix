@@ -801,6 +801,70 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const canonicalCity = nearestCity?.name || addr.city;
       const canonicalRegion = nearestCity?.region || addr.region;
 
+      // Regression Fix (BUG A - 2026-08-20): EXPLICIT USER SELECTION ALWAYS WINS over GPS.
+      // Root cause: this granted branch UNCONDITIONALLY canonicalized the GPS city and
+      // $set user.city + PATCHed the backend. Combined with the 700ms auto-prompt
+      // (Post-Audit Decision 6), a user who picked e.g. "Faisalabad" at onboarding was
+      // SILENTLY switched to whatever reverse-geocoding resolved ("Multan"/"Khanewal
+      // District" - which also happens when a VPN/emulator reports proxied coordinates).
+      // Chosen option (a) - simplest, no confirm prompt UI: if an explicit city exists
+      // (picked at onboarding / PlaceSearch / Profile edit, or restored as the user's
+      // stored city), GPS may refine the pin ONLY when it canonicalizes to the SAME
+      // city. A conflicting GPS reading is ignored for location purposes: the explicit
+      // city stays and the backend is reconciled to it. To change cities, the user uses
+      // Profile or PlaceSearch again (explicit by design).
+      const explicitCity =
+        user?.city || getStoredUser()?.city || (location.custom ? location.city : undefined);
+      if (explicitCity && canonicalCity && explicitCity !== canonicalCity) {
+        console.log(
+          `[Location] GPS resolved to "${canonicalCity}" but "${explicitCity}" was explicitly selected - keeping explicit selection (no silent override)`
+        );
+        // Never keep the conflicting reading as the gps fallback either - resetLocation()
+        // re-applies `gps`, which would otherwise re-trigger the override.
+        setGps(null);
+        const ei = getCityByName(explicitCity);
+        // P2 doctrine: never clobber a precise saved pin - reuse the backend's stored
+        // pin when it still canonicalizes to the explicit city; else use the city center.
+        const stored = getStoredUser();
+        const savedCoords = (stored as any)?.location?.coordinates as number[] | undefined;
+        const savedPinMatches =
+          !!ei &&
+          Array.isArray(savedCoords) &&
+          savedCoords.length === 2 &&
+          !(savedCoords[0] === 0 && savedCoords[1] === 0) &&
+          findNearestCity({ lng: savedCoords[0], lat: savedCoords[1] })?.name === ei.name;
+        const keepCoords =
+          ei && savedPinMatches
+            ? ({ lng: savedCoords![0], lat: savedCoords![1] } as Coords)
+            : ei
+              ? getCityCoords(ei.name)
+              : null;
+        if (ei && keepCoords) {
+          setLocation({
+            status: 'granted',
+            coords: keepCoords,
+            address: `${ei.name}, ${ei.region}`,
+            city: ei.name,
+            region: ei.region,
+            accuracy: null,
+            custom: true,
+          });
+          // Reconcile the backend ONLY when it is desynced from the explicit city
+          // (repairs records poisoned by the old silent-override; idempotent; leaves
+          // healthy precise pins untouched).
+          if (!savedPinMatches) {
+            try {
+              await api.users.updateLocation(keepCoords.lng, keepCoords.lat, ei.name);
+              console.log(`[Location] Reconciled backend with explicit city "${ei.name}"`);
+            } catch (e) {
+              console.warn('[Location] Failed to reconcile backend with explicit city', e);
+            }
+          }
+        }
+        if (user?.role === 'provider') showToast("You're live — ready to receive requests!", 'check');
+        return;
+      }
+
       const next: Loc = {
         status: 'granted',
         coords,
@@ -861,7 +925,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setStage(s => (s === 'location' ? 'app' : s));
     }
-  }, [user, location.city, showToast]);
+  }, [user, location.city, location.custom, showToast]);
 
   const skipLocation = useCallback(() => {
     // Post-Audit Fix P1: "skip" means "use my selected city" - NOT hardcoded Faisalabad.

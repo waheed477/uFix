@@ -255,11 +255,49 @@ Adjusted copy that implied geographic precision: LocationPermissionScreen bullet
 
 **Verification:** P3 live suite 6/6, P4 live suite 3/3, P5 fatal tests 3/3 (missing/invalid/ALLOW_NO_DB), built-bundle assertions 6/6, and FULL regression: e2e-bidirectional 48/48 + e2e-availability-expiry 39/39 + audit-live-checks 12/12 - all PASS after these changes.
 
+## Regression Fixes — 2026-08-20
+
+Two CONFIRMED regressions reported by the user; both root-caused, fixed, live-tested, and permanently guarded by a new automated suite `backend/tests/guard-regression-checks.js` (8 checks, runs with the other suites).
+
+### BUG A (critical): GPS silently overrode the explicitly selected city
+**Symptom**: user picked **Faisalabad** at onboarding, but the Home showed **Multan / "Khanewal District"**.
+**Root cause**: in `store.tsx` `requestLocation()` (granted branch), the Post-Audit P3 canonicalization (`findNearestCity` + $set `user.city` + atomic `PATCH /users/location {lng,lat,city}`) ran **unconditionally** — it never checked whether the user had *explicitly* chosen a city. Combined with the Decision-6 auto-prompt (fires ~700ms after the LocationPermissionScreen mounts, zero user action), any GPS reading that reverse-geocoded elsewhere (incl. proxied/VPN coordinates → "Khanewal District" → nearest DB city "Multan") silently replaced the onboarding selection. Sequencing: GPS resolves async AFTER the city was already set; the handler had no "explicit wins" check.
+**Chosen fix — option (a) (simplest, no confirm-prompt UI)**: *explicit selection always wins; GPS may never silently switch it.*
+- If an explicit city exists (onboarding picker / PlaceSearch / Profile edit / restored stored city), a GPS reading canonicalizing to the **same** city may refine the pin; a **conflicting** reading is ignored for location purposes entirely.
+- On conflict: `setGps(null)` (so `resetLocation()` can't re-apply the bad reading), location reverts to the explicit city — reusing the backend's stored pin when it still matches that city (P2 doctrine: never clobber a precise pin), else city center.
+- Backend is **reconciled** to the explicit city only when desynced (idempotent; also repairs accounts already poisoned by the old behavior).
+- Trade-off (documented, accepted): a user who genuinely moves cities must update the city via Profile or PlaceSearch — explicit by design.
+- The D6 auto-prompt needed no change; it is now harmless because the guard sits inside `requestLocation` itself (protects every caller).
+
+### BUG B: "Request a service" button visible again on the Provider Home
+**Symptom**: customer CTA re-appeared for providers (regression of the earlier Bug-5 fix).
+**Root cause (earlier change identified)**: NOT the Post-Audit pass — a long-latent hole in `onboarding.tsx` (present since at least `9a83cc2`): all three OTP/Google login handlers set `token` + `storedUser` + `stage` but **never hydrated the store's `user`** — `completeAuth()` existed for exactly this and had **zero call sites** (only self-describing TODO comments). With `user === null`, `AppShell`'s gate (`user?.role === "provider"` → false) fell through and mounted the **CUSTOMER** home for providers until a full page reload; the earlier Bug-5 role-gate was therefore silently bypassed.
+**Fix**:
+1. `onboarding.tsx` — all 3 login paths (Google / verify-OTP existing user / complete-details new user) now call `completeAuth(...)` right after `setStoredUser`, which hydrates `user` from the stored session **and** routes the stage (provider w/o category → providerSetup, else → location). Dead TODO comments + unused imports removed.
+2. `App.tsx` `AppShell` — hard guard: when `user` is null, render only a loader (never role content). A silent wrong-role home is now structurally impossible.
+
+### Safeguards added (automated — fail loudly on any reintroduction)
+`backend/tests/guard-regression-checks.js`:
+- B1 button text exists ONLY in `screens/customer.tsx` (comments stripped before scan)
+- B2/B3 home tab + newRequest screen stay role-gated in `App.tsx`
+- B4 `AppShell` null-user guard present
+- B5 `completeAuth()` called in all 3 onboarding login paths
+- B6 LIVE: provider `POST /requests` → 403/401 (server never trusted the client anyway)
+- A1 `requestLocation` keeps the explicit-selection guard
+- A2 LIVE: poison (`PATCH` Multan as old bug did) → reconcile (`PATCH` Faisalabad as the fix does) → profile shows city+coords == explicit selection, atomically
+
+### Verification (all on final code)
+- Guard suite: **8/8 PASS** (6 static frontend invariants + 2 live API)
+- Full regression: e2e-bidirectional **48/48**, e2e-availability-expiry **39/39**, audit-live-checks **12/12**, fix-p3-city-sync **6/6** — all green
+- `npm run build` OK (498.90 kB); bundle contains the guard markers ("keeping explicit selection", "Loading your session", completeAuth)
+- Honest disclosure: no browser exists in this sandbox, so the *pixel-level* absence of the button was verified via the build + source guards above; the role guard's server-side behavior was live-tested (B6). A 10-second visual confirmation on the deployed app is recommended.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
 - [x] Provider Availability Lock & Request Expiry pass - verified 39/39 E2E (2026-08-20)
 - [x] Location System Fixes - Post-Audit pass (P1-P5 + Decisions 6-7), regressions green (2026-08-20)
+- [x] Regression Fixes (BUG A: explicit city > GPS; BUG B: onboarding never hydrated user) - guarded 8/8 + full suites green (2026-08-20)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 
