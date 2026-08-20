@@ -333,10 +333,13 @@ Not moved to the Jobs tab. Reason: moving risks destabilizing the Home layout fo
 - [x] Location System Fixes - Post-Audit pass (P1-P5 + Decisions 6-7), regressions green (2026-08-20)
 - [x] Regression Fixes (BUG A: explicit city > GPS; BUG B: onboarding never hydrated user) - guarded 8/8 + full suites green (2026-08-20)
 - [x] Pre-Deployment pass: Item 1 phone dead-end FIXED (read-only), Item 2 photo upload wired live, Item 3 Home reminder added, Item 4 documented - 118/118 green (2026-08-20)
+- [x] FINAL 26-point deployment verification: 118/118 suites + full lifecycle run (tests/final-lifecycle-run.js) 31/31 - READY (2026-08-20)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 
 ## Notes
+- Test-harness note: e2e-availability-expiry [A6] can flake ONLY if many suite loops run on the SAME dev-inmemory server (limit(20) on /providers/available + accumulated test providers); restart dev-inmemory.js for a clean DB - verified 39/39 on clean. limit(20) is intended. App code is correct.
+- Notification design (deliberate): persisted bell entries go to the COUNTER-party of an action (e.g. on accept, provider gets offer_accepted; the customer-actor gets instant UI feedback instead of a self-notification).
 - Site fully functional end-to-end, two real users (customer + provider) can complete entire journey: signup with city, request with area name, offer with distance-based price PKR, accept, contact unlock tel:, status timeline live, live location both ways on map, chat real-time, rating, history, notifications, city-based filtering (plumber request -> only plumbers same city)
 - Visual design preserved, only data layer changed + new city-based + PKR + perfect SVG map
 - No mock data: PROVIDERS/SEED_REQUESTS removed, only CATEGORIES config
