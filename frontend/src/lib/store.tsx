@@ -51,6 +51,8 @@ import type {
   JobStatus,
   Offer,
   Role,
+  SentOffer,
+  SentOfferStatus,
   User,
   GeoPoint,
 } from "./types";
@@ -70,6 +72,7 @@ import {
 } from "./location";
 import { api, getToken, setToken, setStoredUser, getStoredUser, clearAuth } from "./api";
 import { socketClient } from "./socket";
+import { notifyAlert } from "./sound";
 import {
   adaptBackendUserToFrontendUser,
   adaptBackendRequestToFrontendJob,
@@ -152,6 +155,10 @@ interface AppContextValue {
   acceptOffer: (jobId: string, offer: Offer) => void;
   declineOffer: (jobId: string, offerId: string) => void;
   cancelRequest: (jobId: string) => void;
+  directBookRequest: (requestId: string, providerId: string) => Promise<boolean>;
+  openActiveJob: () => Promise<boolean>;
+  openJobRating: (jobId: string) => void;
+  dismissMyOffer: (offerId: string) => void;
   completeJob: (jobId: string, rating: number, review: string) => void;
 
   // provider actions - real backend
@@ -162,6 +169,9 @@ interface AppContextValue {
   openChat: (jobId: string) => void;
   markRead: (jobId: string, senderId: string) => void;
   sendMessage: (jobId: string, text: string, peer: { id: string; isProvider: boolean }) => void;
+
+  // new for Bidirectional Sync pass - provider's own sent offers with live fate badges
+  myOffers: SentOffer[];
 
   // new for Phase 9 - exposed for screens that need real data
   notifications: any[];
@@ -206,6 +216,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({});
+
+  // Bidirectional Sync pass: provider-side tracking of offers THEY sent.
+  // Persisted to localStorage so the "Your offers" activity view survives refresh.
+  // Fate is updated live by socket events: offer:accepted / offer:declined / offer:rejected / request:cancelled.
+  const MY_OFFERS_KEY = 'ufix_my_offers';
+  const [myOffers, setMyOffers] = useState<SentOffer[]>(() => {
+    try {
+      const raw = localStorage.getItem(MY_OFFERS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.slice(0, 30) : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(MY_OFFERS_KEY, JSON.stringify(myOffers.slice(0, 30)));
+    } catch {}
+  }, [myOffers]);
+
+  /** Mark sent offers' fate. Pass offerId or requestId matcher. */
+  const markMyOffers = useCallback((matcher: { offerId?: string; requestId?: string }, status: SentOfferStatus) => {
+    if (!matcher.offerId && !matcher.requestId) return;
+    setMyOffers(prev => {
+      let changed = false;
+      const next = prev.map(o => {
+        const hit = matcher.offerId
+          ? o.id === matcher.offerId
+          : o.requestId === matcher.requestId && o.status === 'pending';
+        if (hit && o.status !== status) {
+          changed = true;
+          return { ...o, status };
+        }
+        return o;
+      });
+      return changed ? next : prev;
+    });
+  }, []);
 
   const isMountedRef = useRef(true);
 
@@ -358,29 +407,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // BUG 2 FIX: Play sound + vibration for provider when new matching request arrives
         // This must happen WITHOUT requiring manual refresh - card appears via setNearbyRequests above
-        try {
-          // Vibration
-          if ('vibrate' in navigator) {
-            navigator.vibrate([200, 100, 200]);
-          }
-          // Sound via Web Audio
-          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          if (audioCtx) {
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.4);
-            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.01);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
-            oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 0.6);
-          }
-        } catch (e) {
-          console.warn('[Store] Sound/vibration failed', e);
-        }
+        // (sound/vibration implementation deduplicated into lib/sound.ts - shared with other live events)
+        notifyAlert('new-request');
 
         showToast(`New ${backendRequest.category} request in ${backendRequest.city || 'your city'} nearby`, 'info');
       } catch (e) {
@@ -423,6 +451,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const requestId = data.request?.id || data.requestId;
 
+          // Bidirectional Sync: mark this provider's own sent offer as accepted + celebratory feedback
+          if (data.offer?.id) markMyOffers({ offerId: data.offer.id.toString() }, 'accepted');
+          notifyAlert('positive');
+
           showToast(data.message || 'Your offer was accepted! 🎉', 'check');
 
           // Refresh jobs to get new active job
@@ -456,11 +488,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })();
     });
 
-    // Offer:rejected → provider gets rejected
+    // Offer:rejected → provider's offer was not selected (customer accepted someone else's)
+    // Bidirectional Sync: update provider's own offer card to "Not selected" badge, live.
     const offOfferRejected = socketClient.on('offer:rejected', (data: any) => {
       console.log('[Store] Received offer:rejected', data);
-      showToast('Offer not selected', 'info');
-      // Could remove offer from UI or mark rejected
+      if (data.offerId) markMyOffers({ offerId: data.offerId.toString() }, 'rejected');
+      if (data.requestId) markMyOffers({ requestId: data.requestId.toString() }, 'rejected');
+      showToast(data.message || 'Your offer was not selected', 'info');
+    });
+
+    // Offer:declined (NEW) → customer explicitly declined THIS provider's offer
+    // Provider gets: live "Declined" badge on their offer card + toast (notification persisted by backend)
+    const offOfferDeclined = socketClient.on('offer:declined', (data: any) => {
+      console.log('[Store] Received offer:declined', data);
+      if (data.offerId) markMyOffers({ offerId: data.offerId.toString() }, 'declined');
+      notifyAlert('negative');
+      showToast('Customer declined your offer — you can send a revised one', 'info');
     });
 
     // Request:closed → provider, request no longer available
@@ -472,10 +515,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     // Request:cancelled → provider, request cancelled by customer
+    // Bidirectional Sync: any pending offer THIS provider sent on it gets a "Cancelled" badge (not silently dropped)
     const offRequestCancelled = socketClient.on('request:cancelled', (data: any) => {
       console.log('[Store] Received request:cancelled', data);
       const cancelledId = data.requestId;
       setNearbyRequests(prev => prev.filter(r => r.id !== cancelledId));
+      if (cancelledId) markMyOffers({ requestId: cancelledId.toString() }, 'cancelled');
       showToast('Request cancelled by customer', 'info');
     });
 
@@ -483,7 +528,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const offJobStatusUpdate = socketClient.on('job:statusUpdate', (data: any) => {
       console.log('[Store] Received job:statusUpdate', data);
       try {
-        const jobId = data.jobId || data.job?.id;
+        const jobId = (data.jobId || data.job?.id)?.toString();
         const newStatus = data.newStatus;
 
         if (!jobId || !newStatus) return;
@@ -499,6 +544,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Note: activeJob is derived from jobs + activeJobId, so we need to update jobs and let activeJob effect handle it
         // Also show toast
         showToast(`Job status: ${newStatus.replace('_', ' ')}`, 'check');
+
+        // Bidirectional Sync (Part B): job COMPLETED is a first-class moment on BOTH sides -
+        // prominent feedback + automatic transition into the Rating screen (no digging required):
+        // - Customer: "Your job is complete!" → rate the provider
+        // - Provider: confirmation on their side too → rate the customer (Phase 8 supports both directions)
+        if (newStatus === 'completed') {
+          notifyAlert('positive');
+          setActiveJobId(jobId);
+          if (user.role === 'customer') {
+            showToast('Your job is complete! 🎉 Please rate your experience', 'check');
+          } else {
+            showToast('Job completed! 🎉 Rate your customer', 'check');
+          }
+          setTabState('jobs');
+          setStack(['rating']);
+        }
       } catch (e) {
         console.error('Failed to handle job:statusUpdate', e);
       }
@@ -621,6 +682,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       offOfferNew();
       offOfferAccepted();
       offOfferRejected();
+      offOfferDeclined();
       offRequestClosed();
       offRequestCancelled();
       offJobStatusUpdate();
@@ -629,7 +691,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       offChatError();
       offNotificationNew();
     };
-  }, [stage, user, draftCategory, location.coords]);
+  }, [stage, user, draftCategory, location.coords, markMyOffers]);
 
   // Helper for timestamp
   function toTimestamp(date: any): number {
@@ -774,15 +836,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setJobs([]);
     setMessages({});
     setNearbyRequests([]);
+    setMyOffers([]);
+    try { localStorage.removeItem(MY_OFFERS_KEY); } catch {}
     setActiveJobId(null);
     setActiveRequestId(null);
+    persistActiveRequestId(null);
     setStack([]);
     setTabState('home');
     setStage('auth');
     setNotifications([]);
     setUnreadCount(0);
     showToast('Logged out', 'info');
-  }, []);
+  }, [persistActiveRequestId]);
 
   const logout = useCallback(() => {
     handleLogout();
@@ -992,19 +1057,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [persistActiveRequestId]);
 
-  const declineOffer = useCallback((jobId: string, offerId: string) => {
-    // No backend endpoint for decline (offers auto-rejected on accept), so just remove locally
-    setJobs(prev => prev.map(j => j.id === jobId ? { ...j, offers: j.offers.filter(o => o.id !== offerId) } : j));
-    showToast('Offer declined', 'info');
+  const declineOffer = useCallback(async (jobId: string, offerId: string) => {
+    // Bidirectional Sync (Part C): REAL backend decline now - PATCH /api/offers/:id/decline
+    // Customer declines ONE offer; request stays open so they can accept a different offer later,
+    // and the specific provider is notified (offer:declined socket + persisted offer_declined notification).
+    try {
+      setLoading('declineOffer', true);
+      await api.offers.decline(offerId);
+      // Remove locally on success - the request remains open with other offers
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, offers: j.offers.filter(o => o.id !== offerId) } : j));
+      showToast('Offer declined — request stays open for other offers', 'info');
+    } catch (err: any) {
+      console.error('Decline offer failed', err);
+      showToast(err.message || 'Failed to decline offer', 'info');
+    } finally {
+      setLoading('declineOffer', false);
+    }
   }, []);
 
   const cancelRequest = useCallback(async (jobId: string) => {
     try {
       setLoading('cancelRequest', true);
       await api.requests.cancel(jobId);
-      
+
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'cancelled' as any } : j));
       setActiveRequestId(null);
+      persistActiveRequestId(null);
       setStack([]);
       setTabState('jobs');
       showToast('Request cancelled', 'info');
@@ -1014,31 +1092,112 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading('cancelRequest', false);
     }
+  }, [persistActiveRequestId]);
+
+  /**
+   * Direct booking (provider discovery model) - Bidirectional Sync (Part A fix)
+   * Previously AvailableProvidersScreen dispatched a `ufix:booked` window event that NOTHING
+   * listened to, leaving the customer stranded on the providers list (dead end).
+   * Now the whole accept→unlock→navigate sequence lives here, mirroring acceptOffer():
+   * the customer's screen immediately transitions to Active Job with provider details + phone unlocked.
+   */
+  const directBookRequest = useCallback(async (requestId: string, providerId: string): Promise<boolean> => {
+    try {
+      setLoading('directBook', true);
+      const response = await api.requests.directAccept(requestId, providerId);
+      const jobId = (response.job?.id || response.job?._id)?.toString();
+
+      const providerName = response.acceptedOffer?.provider?.name || 'Provider';
+      showToast(`${providerName} booked — on the way!`, 'check');
+
+      await refreshJobs();
+
+      if (jobId) setActiveJobId(jobId);
+      setActiveRequestId(null);
+      persistActiveRequestId(null);
+      setStack(['activeJob']);
+      setTabState('jobs');
+      console.log(`[directBook] Booked provider ${providerId} -> job ${jobId}, navigated to activeJob`);
+      return true;
+    } catch (err: any) {
+      console.error('Direct booking failed', err);
+      showToast(err.message || 'Failed to book provider', 'info');
+      return false;
+    } finally {
+      setLoading('directBook', false);
+    }
+  }, [persistActiveRequestId]);
+
+  /**
+   * Open the user's current active job screen (used from notifications tap).
+   * Fetches the live job from the backend so it also works after a refresh,
+   * when activeJobId hasn't been restored yet.
+   */
+  const openActiveJob = useCallback(async (): Promise<boolean> => {
+    try {
+      setLoading('openActiveJob', true);
+      const data = await api.jobs.myActive();
+      if (data?.job) {
+        const frontendJob = adaptBackendJobToFrontendJob(data.job, { baseCoords: location.coords || DEFAULT_COORDS });
+        setJobs(prev => {
+          const exists = prev.some(j => j.id === frontendJob.id);
+          return exists ? prev.map(j => j.id === frontendJob.id ? frontendJob : j) : [frontendJob, ...prev];
+        });
+        setActiveJobId(frontendJob.id);
+        setTabState('jobs');
+        setStack(['activeJob']);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      // Silent by design: callers (notification taps) fall back to the jobs tab when there is
+      // no longer an active job (e.g. it was completed) - a scary toast would be wrong there.
+      console.log('openActiveJob: no active job', err?.message || err);
+      return false;
+    } finally {
+      setLoading('openActiveJob', false);
+    }
+  }, [location.coords]);
+
+  /** Open the rating screen for a specific (completed) job - used by "Rate now" affordances. */
+  const openJobRating = useCallback((jobId: string) => {
+    setActiveJobId(jobId);
+    setTabState('jobs');
+    setStack(['rating']);
+  }, []);
+
+  /** Dismiss one entry from the provider's "Your offers" activity list. */
+  const dismissMyOffer = useCallback((offerId: string) => {
+    setMyOffers(prev => prev.filter(o => o.id !== offerId));
   }, []);
 
   const completeJob = useCallback(async (jobId: string, rating: number, review: string) => {
     try {
       setLoading('completeJob', true);
-      
-      // Rating screen calls completeJob with rating and review
-      // In real backend, rating is separate POST /api/jobs/:jobId/rate
-      // And job completion is via status update to completed (provider side)
-      // For customer side, "Mark as completed & rate" should call rating endpoint
+
+      // Bidirectional Sync note: this action now ONLY submits the rating (POST /api/jobs/:jobId/rate).
+      // The job itself is marked complete by the PROVIDER via PATCH /api/jobs/:id/status —
+      // both sides are auto-prompted to rate via the job:statusUpdate socket handler.
+      // (Previously the customer had a fake "Mark as completed & rate" button that hit this while
+      // the job was still in_progress, got a 400 from the backend, and silently faked completion —
+      // that dead UI has been removed.)
       await api.jobs.rate(jobId, { rating, comment: review });
 
+      // Record rating locally (hides the "Rate now" affordance on history/job cards)
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'completed' as any, rating, review } : j));
       setActiveJobId(null);
       setStack([]);
       setTabState('jobs');
-      showToast('Job completed — thanks for rating!', 'check');
+      showToast('Thanks for rating! ⭐', 'check');
     } catch (err: any) {
-      console.error('Complete job (rate) failed', err);
-      // Even if rating fails, mark as completed locally for UX
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'completed' as any, rating, review } : j));
+      console.error('Rating submit failed', err);
+      // Keep the user on the result state (job is already completed server-side), but tell them
+      // the rating itself did not go through so they can retry from the job card later.
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'completed' as any } : j));
       setActiveJobId(null);
       setStack([]);
       setTabState('jobs');
-      showToast(err.message || 'Job completed — thanks for rating!', 'check');
+      showToast(err.message || 'Failed to submit rating — you can retry from the job card', 'info');
     } finally {
       setLoading('completeJob', false);
     }
@@ -1049,15 +1208,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       setLoading('sendOffer', true);
 
+      // Capture the request info BEFORE removing it from the list (needed for the provider's
+      // "Your offers" activity card - Bidirectional Sync Part D row "Offer sent")
+      const sourceRequest = nearbyRequests.find(r => r.id === requestId);
+
       // Find request to get its details for ETA calculation? Use default ETA 15
       const response = await api.offers.create(requestId, { visitingCharge: charge, etaMinutes: 15 });
+
+      // Track own offer with live-fate badge (updated later by socket events)
+      const sentOfferId = (response.offer?.id || response.offer?._id)?.toString();
+      if (sentOfferId) {
+        setMyOffers(prev => {
+          const withoutDup = prev.filter(o => o.id !== sentOfferId);
+          return [{
+            id: sentOfferId,
+            requestId,
+            category: (sourceRequest?.category || 'plumber') as Category,
+            description: sourceRequest?.description || 'Service request',
+            address: sourceRequest?.address || '',
+            city: (sourceRequest as any)?.city,
+            visitingCharge: charge,
+            etaMin: 15,
+            status: 'pending' as SentOfferStatus,
+            createdAt: Date.now(),
+          }, ...withoutDup].slice(0, 30);
+        });
+      }
 
       // Remove from nearbyRequests
       setNearbyRequests(prev => prev.filter(r => r.id !== requestId));
 
       // Show toast, but don't create job yet - job will be created when customer accepts
       // For provider UX, we can optimistically show that offer sent
-      showToast(`Offer of PKR ${charge} sent`, 'send');
+      showToast(`Offer of PKR ${charge} sent — track it in "Your offers"`, 'send');
 
       // Note: In real flow, job will be created on acceptance via socket offer:accepted event
       // That event will trigger refreshJobs and navigate to activeJob
@@ -1067,7 +1250,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading('sendOffer', false);
     }
-  }, []);
+  }, [nearbyRequests]);
 
   const updateJobStatus = useCallback(async (jobId: string, status: JobStatus) => {
     try {
@@ -1086,10 +1269,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status } : j));
 
       if (status === 'completed') {
-        showToast('Job marked complete', 'check');
-        setActiveJobId(null);
-        setStack([]);
+        // Bidirectional Sync (Part B): provider gets a clear completion confirmation on their
+        // own side and is taken straight to THEIR rating prompt for the customer (Phase 8
+        // supports both directions). The job:statusUpdate socket handler mirrors this for the
+        // customer side; both paths converge on the Rating screen idempotently.
+        showToast('Job completed! 🎉 Rate your customer', 'check');
+        notifyAlert('positive');
+        setActiveJobId(jobId);
         setTabState('jobs');
+        setStack(['rating']);
       } else {
         showToast(`Status updated to ${status.replace('_', ' ')}`, 'check');
       }
@@ -1519,7 +1707,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     acceptOffer,
     declineOffer,
     cancelRequest,
+    directBookRequest,
+    openActiveJob,
+    openJobRating,
+    dismissMyOffer,
     completeJob,
+    myOffers,
     sendOffer,
     updateJobStatus,
     openChat,

@@ -16,9 +16,24 @@
  * Base URL handling:
  * - Uses import.meta.env.VITE_API_URL || 'http://localhost:5000'
  * - No hardcoded localhost:5000 anywhere else - all requests go through this client
+ * - Live-preview safe: when the app is served through a port-proxied preview host
+ *   (https://{port}-{sandbox}.e2b.app), the browser is NOT on the sandbox's localhost,
+ *   so we derive the backend origin from the preview hostname (port 5000) instead.
  */
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
+function resolveApiBase(): string {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envUrl) return envUrl;
+  try {
+    const host = window.location.hostname;
+    if (/^\d+-.+\.e2b\.app$/.test(host)) {
+      return `${window.location.protocol}//${host.replace(/^\d+-/, '5000-')}`;
+    }
+  } catch {}
+  return 'http://localhost:5000';
+}
+
+const API_BASE = resolveApiBase();
 
 const TOKEN_KEY = 'ufix_jwt';
 const USER_KEY = 'ufix_user';
@@ -271,6 +286,11 @@ export const api = {
     getForRequest: (requestId: string) => apiFetch(`/api/requests/${requestId}/offers`),
     accept: (offerId: string) =>
       apiFetch(`/api/offers/${offerId}/accept`, {
+        method: 'PATCH',
+      }),
+    // NEW: Decline a single pending offer (request stays open for other offers)
+    decline: (offerId: string) =>
+      apiFetch(`/api/offers/${offerId}/decline`, {
         method: 'PATCH',
       }),
   },

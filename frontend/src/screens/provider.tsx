@@ -12,16 +12,19 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
-import { categoryById, type IncomingRequest } from "@/lib/types";
+import { categoryById, type IncomingRequest, type SentOffer } from "@/lib/types";
 import { NotificationBell } from "@/components/notifications";
 import { calculateDistanceKm, watchPosition, clearWatch, type Coords } from "@/lib/location";
+import { notifyAlert } from "@/lib/sound";
 import {
   Avatar,
   BanknoteIcon,
   BriefcaseIcon,
   Button,
   CategoryIcon,
+  ChevronRightIcon,
   ClockIcon,
+  CloseIcon,
   MapPinIcon,
   PowerIcon,
   SendIcon,
@@ -59,21 +62,14 @@ function RequestCard({
 }) {
   const meta = categoryById(req.category);
   const { user } = useApp();
-  // BUG 3 FIX: Suggested price uses provider's defaultVisitingCharge from profile + distance-based calculation (more professional)
-  // Editable price field - provider can see suggestion but must be able to edit before submitting
-  const basePrice = (user as any)?.defaultVisitingCharge || (user as any)?.defaultVisitingCharge === 0 ? (user as any).defaultVisitingCharge : (req.category === "mechanic" ? 450 : req.category === "electrician" ? 350 : 300);
+  // Suggested price = provider's own defaultVisitingCharge from profile (falls back to a
+  // category-based suggestion). The field stays fully editable - whatever number is in the
+  // box when "Send offer" is tapped is the price the backend receives (BUG 3 kept working).
+  const profilePrice = (user as any)?.defaultVisitingCharge;
+  const basePrice = typeof profilePrice === "number"
+    ? profilePrice
+    : (req.category === "mechanic" ? 450 : req.category === "electrician" ? 350 : 300);
   const [charge, setCharge] = useState(basePrice);
-
-  // Update suggested when distance changes (distance-based pricing - professional)
-  useEffect(() => {
-    // If provider hasn't edited yet (charge === basePrice), update with distance-based suggestion
-    // Distance-based: base + distance*40, capped 100-5000
-    const distance = (req as any).distanceKm || 1.5;
-    const distanceBased = Math.min(5000, Math.max(100, Math.round((basePrice || 300) + distance * 40)));
-    // Only auto-update if user hasn't manually edited (check if charge is still close to previous base)
-    // For simplicity, we keep initial charge as basePrice, but provider can edit
-    // We could also show suggested hint
-  }, [req.distanceKm]);
 
   // Live distance calculation reading both live locations
   const liveDistance = useMemo(() => {
@@ -193,8 +189,59 @@ function RequestCard({
   );
 }
 
+/**
+ * MyOfferCard - Bidirectional Sync (Part C & D)
+ * The provider's "activity view": every offer they send stays visible with a live-updating
+ * fate badge, driven by socket events (offer:accepted / offer:declined / offer:rejected /
+ * request:cancelled). No refresh needed, and an accepted offer deep-links into the Active Job.
+ */
+const SENT_BADGE: Record<SentOffer["status"], { label: string; cls: string }> = {
+  pending: { label: "⏳ Waiting for customer", cls: "bg-amber-100 text-amber-700" },
+  accepted: { label: "✓ Accepted", cls: "bg-emerald-100 text-emerald-700" },
+  declined: { label: "✗ Declined", cls: "bg-rose-100 text-rose-600" },
+  rejected: { label: "Not selected", cls: "bg-ink-100 text-ink-500" },
+  cancelled: { label: "Request cancelled", cls: "bg-ink-100 text-ink-500" },
+};
+
+function MyOfferCard({ offer, onOpenJob, onDismiss }: { offer: SentOffer; onOpenJob: () => void; onDismiss: () => void }) {
+  const meta = categoryById(offer.category);
+  const badge = SENT_BADGE[offer.status];
+  const isAccepted = offer.status === "accepted";
+  const isTerminal = offer.status === "declined" || offer.status === "rejected" || offer.status === "cancelled";
+  return (
+    <div className={cn("flex items-center gap-3 rounded-2xl bg-white p-3.5 shadow-card", isAccepted && "ring-2 ring-emerald-400")}>
+      <CategoryIcon category={offer.category} size={40} soft />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <p className="line-clamp-1 font-display text-[13px] font-bold text-ink-900">{offer.description}</p>
+          <span className="shrink-0 font-display text-sm font-extrabold text-accent-600">PKR {offer.visitingCharge}</span>
+        </div>
+        <p className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-400">
+          <MapPinIcon className="h-3 w-3 shrink-0" />
+          <span className="truncate">{offer.address || offer.city || "Customer location"}</span>
+          <span className="text-ink-300">·</span>
+          <span className="shrink-0">{timeAgo(offer.createdAt)}</span>
+        </p>
+        <div className="mt-1.5 flex items-center gap-2">
+          <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-bold", badge.cls)}>{badge.label}</span>
+          <span className="text-[10px] font-medium" style={{ color: meta.color }}>{meta.label}</span>
+        </div>
+      </div>
+      {isAccepted ? (
+        <button onClick={onOpenJob} className="tap-highlight-none flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white active:scale-95" aria-label="Open active job">
+          <ChevronRightIcon className="h-5 w-5" />
+        </button>
+      ) : isTerminal ? (
+        <button onClick={onDismiss} className="tap-highlight-none flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink-50 text-ink-400 active:scale-95" aria-label="Dismiss">
+          <CloseIcon className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function ProviderHome() {
-  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location } = useApp();
+  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location, myOffers, dismissMyOffer, openActiveJob } = useApp();
   const online = user?.isOnline ?? false;
   const firstName = user?.name.split(" ")[0] ?? "there";
   const [liveCoords, setLiveCoords] = useState<Coords | null>(null);
@@ -249,30 +296,12 @@ export function ProviderHome() {
 
   // Sound + Vibration on new request for smoothness - BUG 2 FIX
   // Only trigger when count increases (new request arrives), not on initial load
+  // (implementation deduplicated into lib/sound.ts)
   const prevCountRef = useRef(0);
   useEffect(() => {
     if (nearbyRequests.length > prevCountRef.current && online) {
-      // New request(s) arrived - play sound + vibration
       console.log(`[Provider] New request(s) arrived! Count ${prevCountRef.current} -> ${nearbyRequests.length}, playing sound+vibration`);
-      try {
-        if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-      } catch {}
-      try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const oscillator = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
-        oscillator.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-        oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.5);
-        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.02);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.7);
-        oscillator.start(audioCtx.currentTime);
-        oscillator.stop(audioCtx.currentTime + 0.7);
-      } catch (e) {
-        console.warn('[Provider] Sound failed', e);
-      }
+      notifyAlert('new-request');
     }
     prevCountRef.current = nearbyRequests.length;
   }, [nearbyRequests.length, online]);
@@ -325,6 +354,23 @@ export function ProviderHome() {
             </div>
           ))}
         </div>
+
+        {/* Your offers - live fate of every offer this provider sent (Bidirectional Sync Part D) */}
+        {myOffers.length > 0 && (
+          <div className="animate-slide-up">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <h2 className="font-display text-sm font-bold text-ink-900">Your offers · live</h2>
+              <span className="text-[11px] font-medium text-ink-400">
+                {myOffers.filter(o => o.status === 'pending').length} waiting
+              </span>
+            </div>
+            <div className="space-y-2.5">
+              {myOffers.slice(0, 4).map((o) => (
+                <MyOfferCard key={o.id} offer={o} onOpenJob={openActiveJob} onDismiss={() => dismissMyOffer(o.id)} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between px-4 pb-2.5">

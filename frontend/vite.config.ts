@@ -16,4 +16,8 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    // Allow port-proxied live-preview hosts (https://{port}-{sandbox}.e2b.app) in addition to localhost
+    allowedHosts: [".e2b.app", "localhost"],
+  },
 });

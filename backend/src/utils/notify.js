@@ -51,10 +51,12 @@ const createNotification = async ({ userId, type, title, body, relatedId = null 
       'new_offer',
       'offer_accepted',
       'offer_rejected',
+      'offer_declined',
       'request_new',
       'request_cancelled',
       'job_status_update',
-      'new_message'
+      'new_message',
+      'new_rating'
     ];
 
     if (!validTypes.includes(type)) {

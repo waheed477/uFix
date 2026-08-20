@@ -22,7 +22,21 @@
 import { io, Socket } from 'socket.io-client';
 import { getToken } from './api';
 
-const SOCKET_URL = (import.meta as any).env?.VITE_SOCKET_URL || (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
+// Live-preview safe resolution (same rule as api.ts): on a port-proxied preview host the
+// browser cannot reach the sandbox's localhost - derive the backend origin from the hostname.
+function resolveSocketUrl(): string {
+  const envUrl = (import.meta as any).env?.VITE_SOCKET_URL || (import.meta as any).env?.VITE_API_URL;
+  if (envUrl) return envUrl;
+  try {
+    const host = window.location.hostname;
+    if (/^\d+-.+\.e2b\.app$/.test(host)) {
+      return `${window.location.protocol}//${host.replace(/^\d+-/, '5000-')}`;
+    }
+  } catch {}
+  return 'http://localhost:5000';
+}
+
+const SOCKET_URL = resolveSocketUrl();
 
 let socket: Socket | null = null;
 let isConnecting = false;

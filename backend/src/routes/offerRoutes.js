@@ -16,4 +16,7 @@ router.use(auth);
 // Accept offer - customer only
 router.patch('/:id/accept', roleCheck('customer'), offerController.acceptOffer);
 
+// Decline a single pending offer - customer only (request stays open)
+router.patch('/:id/decline', roleCheck('customer'), offerController.declineOffer);
+
 module.exports = router;

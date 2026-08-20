@@ -1,6 +1,7 @@
 const Job = require('../models/Job');
 const Review = require('../models/Review');
 const User = require('../models/User');
+const { createNotification } = require('../utils/notify');
 
 /**
  * Review Controller - Phase 8 Ratings & Order History
@@ -147,6 +148,21 @@ const rateJob = async (req, res) => {
 
     await review.populate('fromUser', 'name role');
     await review.populate('toUser', 'name role rating reviews');
+
+    // --- Bidirectional Sync pass (Part D row 8): notify the rated party live ---
+    // "Rating submitted → the other party gets: Notification 'You received a new rating'"
+    // Trivial addition via existing notify utility (persists + emits notification:new).
+    try {
+      await createNotification({
+        userId: toUserId,
+        type: 'new_rating',
+        title: 'You received a new rating',
+        body: `${review.fromUser.name} rated you ${parsedRating}★${review.comment ? `: "${review.comment.substring(0, 80)}"` : ' for your recent job'}`,
+        relatedId: job._id
+      });
+    } catch (notifyErr) {
+      console.error('Notification creation for new_rating failed:', notifyErr.message);
+    }
 
     return res.status(201).json({
       status: 'success',

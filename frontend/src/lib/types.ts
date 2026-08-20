@@ -53,6 +53,28 @@ export interface Offer {
   etaMin: number;
   distanceKm: number;
   timestamp: number;
+  /** Backend offer status (pending/accepted/rejected) - set by adapter, used to filter declined offers */
+  status?: string;
+}
+
+/**
+ * Provider-side view of an offer THEY sent - tracked in store.myOffers
+ * so a provider can see the live fate of every offer without a refresh:
+ * pending (waiting on customer) → accepted / declined / not selected / request cancelled.
+ */
+export type SentOfferStatus = "pending" | "accepted" | "declined" | "rejected" | "cancelled";
+
+export interface SentOffer {
+  id: string;
+  requestId: string;
+  category: Category;
+  description: string;
+  address: string;
+  city?: string;
+  visitingCharge: number;
+  etaMin: number;
+  status: SentOfferStatus;
+  createdAt: number;
 }
 
 export interface ChatMessage {

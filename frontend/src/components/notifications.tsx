@@ -21,11 +21,13 @@ import {
   BriefcaseIcon,
   ChatIcon,
   CheckCircleIcon,
+  CloseIcon,
   NavigateIcon,
+  StarIcon,
   timeAgo,
 } from "./ui";
 
-type IconKey = "offer" | "check" | "request" | "message" | "navigate";
+type IconKey = "offer" | "check" | "request" | "message" | "navigate" | "decline" | "star";
 
 interface FrontendNotif {
   id: string;
@@ -44,6 +46,8 @@ const ICON: Record<IconKey, { Icon: typeof BellIcon; cls: string }> = {
   request: { Icon: BriefcaseIcon, cls: "bg-brand-100 text-brand-700" },
   message: { Icon: ChatIcon, cls: "bg-sky-100 text-sky-600" },
   navigate: { Icon: NavigateIcon, cls: "bg-brand-100 text-brand-700" },
+  decline: { Icon: CloseIcon, cls: "bg-rose-100 text-rose-500" },
+  star: { Icon: StarIcon as typeof BellIcon, cls: "bg-amber-100 text-amber-500" },
 };
 
 // Map backend notification type to icon
@@ -54,6 +58,8 @@ const typeToIcon = (type: string): IconKey => {
     case 'offer_accepted':
     case 'offer_rejected':
       return 'check';
+    case 'offer_declined':
+      return 'decline';
     case 'request_new':
       return 'request';
     case 'request_cancelled':
@@ -62,22 +68,24 @@ const typeToIcon = (type: string): IconKey => {
       return 'navigate';
     case 'new_message':
       return 'message';
+    case 'new_rating':
+      return 'star';
     default:
       return 'check';
   }
 };
 
 export function NotificationBell() {
-  const { 
-    notifications: realNotifications, 
-    unreadCount, 
-    markNotificationRead, 
+  const {
+    notifications: realNotifications,
+    unreadCount,
+    markNotificationRead,
     markAllNotificationsRead,
-    openChat,
     navigate,
-    activeRequestId,
+    setTab,
+    openActiveJob,
   } = useApp();
-  
+
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -101,52 +109,46 @@ export function NotificationBell() {
     relatedId: n.relatedId,
   }));
 
+  // Bidirectional Sync (Part E): tap-to-navigate now actually navigates for every type -
+  // previously this handler was a stack of comments that just closed the dropdown (dead UI).
   const onTap = async (notif: FrontendNotif) => {
-    // Mark as read
     if (!notif.isRead) {
       await markNotificationRead(notif.id);
     }
-
-    // Tap-to-navigate based on type and relatedId
-    // For simplicity, navigate to relevant screen
-    if (notif.type === 'new_message' && notif.relatedId) {
-      // relatedId is message id, but we need jobId - for now open chat tab
-      // In real implementation, relatedId is message id, we could fetch job id from notification's relatedId
-      // For MVP, just open chat tab and let user see conversations
-      setOpen(false);
-      // Try to find jobId from relatedId? For new_message, relatedId is message id, not job id
-      // So we navigate to chat tab where conversation list will show
-      // If we had jobId in relatedId for other types, we could navigate to specific job
-      // For now, simple navigation:
-      if (notif.type === 'new_message') {
-        // We don't have jobId directly, but we can navigate to chat tab
-        // The chat tab will show conversation list
-        // If we want to open specific job chat, we'd need jobId in notification relatedId or fetch message to get jobId
-        // For simplicity, just close dropdown and let user go to chat tab manually
-        // Actually we can try to use openChat if we had jobId - but we don't, so just close
-      }
-    } else if (notif.type === 'new_offer' && activeRequestId) {
-      setOpen(false);
-      navigate("offers");
-    } else if (notif.type === 'request_new') {
-      // Provider: new request nearby - for provider, requests are in home tab, so just close
-      setOpen(false);
-    } else if (notif.type.startsWith('offer_') || notif.type === 'request_cancelled') {
-      setOpen(false);
-      // For offer accepted/rejected, navigate to jobs tab to see active job
-      if (notif.type === 'offer_accepted') {
-        // Could navigate to active job
-      }
-    } else if (notif.type === 'job_status_update' && notif.relatedId) {
-      setOpen(false);
-      // relatedId is jobId for job_status_update, open active job
-      // We can try to open job - but we need to set activeJobId and navigate to activeJob
-      // For simplicity, just close
-    }
-
-    // For any notification with relatedId that is a jobId, we could try to open that job
-    // But without knowing if relatedId is jobId or requestId, we keep simple
     setOpen(false);
+
+    switch (notif.type) {
+      case 'new_offer':
+        // Customer: an offer arrived on their open request
+        navigate('offers');
+        break;
+      case 'offer_accepted':
+      case 'job_status_update': {
+        // Either party: jump straight into the live job; if it already completed, land on the jobs tab
+        const ok = await openActiveJob();
+        if (!ok) setTab('jobs');
+        break;
+      }
+      case 'request_new':
+        // Provider: new request in their city - the card lives on their home tab
+        setTab('home');
+        break;
+      case 'new_message':
+        setTab('chat');
+        break;
+      case 'new_rating':
+        // Job is complete by now - the completed card (and their own pending rate prompt) is on jobs tab
+        setTab('jobs');
+        break;
+      case 'offer_declined':
+      case 'offer_rejected':
+      case 'request_cancelled':
+        // Provider: outcome of an offer they sent (badge lives on home "Your offers", history on jobs)
+        setTab('home');
+        break;
+      default:
+        break;
+    }
   };
 
   const handleMarkAllRead = async () => {

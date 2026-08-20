@@ -234,10 +234,19 @@ export function ActiveJobScreen() {
 
           <div className="pb-2">
             {isCustomer ? (
-              activeJob.status === "in_progress" || activeJob.status === "arrived" ? <Button full size="lg" onClick={() => navigate("rating")}>Mark as completed & rate</Button> : <p className="rounded-2xl bg-white px-4 py-3 text-center text-xs text-ink-500 shadow-card">Your pro will update status live. You can call or chat anytime. Live location both ways via job:locationUpdate</p>
+              activeJob.status === "completed" ? (
+                // Fallback entry only - normally the customer is AUTO-navigated to the Rating
+                // screen the moment the provider marks complete (job:statusUpdate socket handler).
+                <Button full size="lg" onClick={() => navigate("rating")}>Rate your experience ⭐</Button>
+              ) : (
+                // Only the PROVIDER drives the timeline. Removed the old "Mark as completed & rate"
+                // customer button - it fired POST rate while the job was still in_progress, got a
+                // guaranteed 400, and then faked completion locally. Dead-end UI (Part E).
+                <p className="rounded-2xl bg-white px-4 py-3 text-center text-xs text-ink-500 shadow-card">Your pro will update status live. You can call or chat anytime. Live location both ways via job:locationUpdate</p>
+              )
             ) : providerStep ? (
               <Button full size="lg" onClick={() => updateJobStatus(activeJob.id, providerStep.status)} disabled={isUpdatingStatus}>{isUpdatingStatus ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : providerStep.label}</Button>
-            ) : activeJob.status === "completed" ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-center text-xs font-semibold text-emerald-700">Job completed! Waiting for customer rating.</p> : null}
+            ) : activeJob.status === "completed" ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-center text-xs font-semibold text-emerald-700">Job completed! 🎉 You'll be prompted to rate your customer.</p> : null}
           </div>
         </div>
       </div>
@@ -347,7 +356,7 @@ export function ChatScreen() {
 const TAGS = ["Punctual", "Fair price", "Expert work", "Tidy & clean", "Friendly"];
 
 export function RatingScreen() {
-  const { activeJob, completeJob, back, isLoading } = useApp();
+  const { activeJob, completeJob, back, isLoading, user } = useApp();
   const [rating, setRating] = useState(0);
   const [review, setReview] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -361,6 +370,14 @@ export function RatingScreen() {
     );
   }
 
+  // Bidirectional Sync (Part B.4): BOTH sides rate each other - the screen must be role-aware.
+  // Customer rates the provider; provider rates the customer (backend auto-derives toUser).
+  const isCustomer = user?.role === "customer";
+  const peerName = isCustomer ? activeJob.providerName : activeJob.customerName;
+  const peerInitials = isCustomer ? activeJob.providerAvatarInitials ?? "P" : activeJob.customerAvatarInitials ?? "C";
+  const peerColor = isCustomer ? activeJob.providerAvatarColor ?? "#167a6c" : activeJob.customerAvatarColor ?? "#167a6c";
+  const peerRoleLine = isCustomer ? `${categoryById(activeJob.category).label} · completed` : `Customer · completed`;
+
   const toggleTag = (t: string) => setTags(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
   const submit = () => { if (rating === 0) return; const finalReview = review.trim() || tags.join(" · "); completeJob(activeJob.id, rating, finalReview); };
   const isSubmitting = isLoading['completeJob'];
@@ -370,19 +387,20 @@ export function RatingScreen() {
       <ScreenHeader onBack={back} title="Rate your experience" />
       <div className="flex-1 overflow-y-auto p-5">
         <div className="animate-scale-in flex flex-col items-center rounded-3xl bg-white p-6 text-center shadow-card">
-          <Avatar initials={activeJob.providerAvatarInitials ?? "P"} color={activeJob.providerAvatarColor ?? "#167a6c"} size={72} />
-          <h2 className="mt-4 font-display text-xl font-bold text-ink-900">{activeJob.providerName}</h2>
-          <p className="mt-1 text-sm text-ink-500">{categoryById(activeJob.category).label} · completed</p>
+          <Avatar initials={peerInitials} color={peerColor} size={72} />
+          <h2 className="mt-4 font-display text-xl font-bold text-ink-900">{peerName}</h2>
+          <p className="mt-1 text-sm text-ink-500">{peerRoleLine}</p>
           <div className="mt-5"><StarInput value={rating} onChange={setRating} /></div>
           <p className="mt-2 text-sm font-semibold text-ink-600">{rating === 0 ? "Tap a star to rate" : ["", "Poor", "Fair", "Good", "Great", "Excellent!"][rating]}</p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             {TAGS.map((t) => (<button key={t} onClick={() => toggleTag(t)} className={cn("rounded-full border px-3 py-1.5 text-xs font-semibold", tags.includes(t) ? "border-brand-500 bg-brand-50 text-brand-700" : "border-ink-200 text-ink-500")}>{t}</button>))}
           </div>
-          <textarea value={review} onChange={(e) => setReview(e.target.value)} rows={3} maxLength={200} placeholder="Share a few words…" className="mt-5 w-full resize-none rounded-2xl border-2 border-ink-100 bg-ink-50 p-3.5 text-sm text-ink-900 outline-none placeholder:text-ink-300 focus:border-brand-400 focus:bg-white" />
+          <textarea value={review} onChange={(e) => setReview(e.target.value)} rows={3} maxLength={200} placeholder={isCustomer ? "Share a few words about the pro…" : "Share a few words about the customer…"} className="mt-5 w-full resize-none rounded-2xl border-2 border-ink-100 bg-ink-50 p-3.5 text-sm text-ink-900 outline-none placeholder:text-ink-300 focus:border-brand-400 focus:bg-white" />
         </div>
       </div>
       <div className="border-t border-ink-100 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button full size="lg" onClick={submit} disabled={rating === 0 || isSubmitting}>{isSubmitting ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : "Submit rating & complete"}</Button>
+        <Button full size="lg" onClick={submit} disabled={rating === 0 || isSubmitting}>{isSubmitting ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : `Submit rating${isCustomer ? "" : " for customer"}`}</Button>
+        <p className="mt-2 text-center text-[11px] text-ink-400">The other party gets a live "You received a new rating" notification.</p>
       </div>
     </div>
   );
@@ -404,7 +422,7 @@ function JobCard({ job, onOpen }: { job: Job; onOpen?: () => void }) {
 }
 
 export function JobsTab() {
-  const { jobs, navigate, refreshJobs, isLoading, activeRequestId, user } = useApp();
+  const { jobs, navigate, refreshJobs, isLoading, activeRequestId, user, acceptOffer, openJobRating } = useApp();
   const sorted = [...jobs].sort((a, b) => b.createdAt - a.createdAt);
   const active = sorted.find((j) => ["accepted", "on_the_way", "arrived", "in_progress"].includes(j.status));
   const openRequests = sorted.filter((j: any) => j._originalStatus === 'pending' || j.status === 'open');
@@ -438,7 +456,9 @@ export function JobsTab() {
                   {openRequestWithOffers.offers.slice(0,2).map((offer: any) => (
                     <div key={offer.id} className="flex items-center justify-between rounded-xl bg-white p-3 shadow-sm">
                       <div className="flex items-center gap-2"><Avatar initials={offer.avatarInitials || 'P'} color={offer.avatarColor || '#167a6c'} size={32} /><div><p className="text-xs font-bold text-ink-900">{offer.providerName}</p><p className="text-[11px] text-ink-500">PKR {offer.visitingCharge} • ETA {offer.etaMin} min</p></div></div>
-                      <Button size="sm" onClick={() => navigate('offers')}>Accept</Button>
+                      {/* Real inline accept (same PATCH /api/offers/:id/accept path as the Offers screen) -
+                          previously this button only navigated, a duplicate/fake entry point (Part E) */}
+                      <Button size="sm" disabled={isLoading['acceptOffer']} onClick={() => acceptOffer(openRequestWithOffers.id, offer)}>Accept</Button>
                     </div>
                   ))}
                 </div>
@@ -453,7 +473,7 @@ export function JobsTab() {
               <ChevronRightIcon className="h-5 w-5 text-white/70" />
             </div>
           )}
-          <div className="space-y-2.5">{sorted.map((j) => (<JobCard key={j.id} job={j} onOpen={active?.id === j.id ? () => navigate("activeJob") : (j as any)._originalStatus === 'pending' || j.status === 'open' ? () => navigate("offers") : undefined} />))}</div>
+          <div className="space-y-2.5">{sorted.map((j) => (<JobCard key={j.id} job={j} onOpen={active?.id === j.id ? () => navigate("activeJob") : (j as any)._originalStatus === 'pending' || j.status === 'open' ? () => navigate("offers") : j.status === 'completed' && !j.rating ? () => openJobRating(j.id) : undefined} />))}</div>
         </div>
       )}
     </div>

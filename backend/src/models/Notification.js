@@ -34,10 +34,12 @@ const notificationSchema = new mongoose.Schema({
         'new_offer',        // offer:new
         'offer_accepted',   // offer:accepted
         'offer_rejected',   // offer:rejected
+        'offer_declined',   // offer:declined (customer declined a single offer - Bidirectional Sync pass)
         'request_new',      // request:new
         'request_cancelled',// request:cancelled
         'job_status_update',// job:statusUpdate
-        'new_message'       // chat:message
+        'new_message',      // chat:message
+        'new_rating'        // you received a new rating (Bidirectional Sync pass)
       ],
       message: 'Invalid notification type'
     },

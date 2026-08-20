@@ -29,11 +29,11 @@ Phase 10 Completed — Site 100% functional end-to-end with city-based filtering
 - Users: GET /api/users/profile, PATCH /api/users/profile (name, city, profilePicture, isOnline), POST /api/users/profile/picture, PATCH /api/users/location {lng,lat}
 - Providers: PATCH /api/providers/setup {category, radiusKm, yearsExperience, defaultVisitingCharge}, POST /api/providers/document, GET /api/providers/verification-status, GET /api/providers/available?city=&category= (city-based online count + list with price), PATCH /api/providers/:id/verify, POST /api/providers/dev/verify-me (dev auto-verify)
 - Requests: POST /api/requests {category, description, lng, lat, address, city}, GET /api/requests/nearby (city+category), GET /api/requests/my, GET /api/requests/:id, PATCH /api/requests/:id/cancel, POST /api/requests/:id/direct-accept {providerId} (direct booking with price from profile)
-- Offers: POST /api/requests/:id/offers {visitingCharge, etaMinutes}, GET /api/requests/:id/offers, PATCH /api/offers/:id/accept
+- Offers: POST /api/requests/:id/offers {visitingCharge, etaMinutes} (re-offer after decline revives rejected offer), GET /api/requests/:id/offers, PATCH /api/offers/:id/accept, PATCH /api/offers/:id/decline (customer-only, owner-only, pending-only, emits offer:declined + offer_declined notification)
 - Jobs: GET /api/jobs/:id, PATCH /api/jobs/:id/status, GET /api/jobs/my/active, GET /api/jobs/history?status=all|completed|cancelled, POST /api/jobs/:jobId/rate, GET /api/jobs/:jobId/reviews
 - Messages: GET /api/jobs/:jobId/messages
 - Notifications: GET /api/notifications, PATCH /:id/read, PATCH /read-all
-- Socket.io: ws://PORT - auth JWT, rooms user:{id}, events: request:new (area name + city + live distance), offer:new, offer:accepted/rejected, request:closed/cancelled, job:statusUpdate, job:locationUpdate (live both ways), chat:send/message/markRead/read/error, notification:new
+- Socket.io: ws://PORT - auth JWT, rooms user:{id}, events: request:new (area name + city + live distance), offer:new, offer:accepted/rejected/declined, request:closed/cancelled, job:statusUpdate, job:locationUpdate (live both ways), chat:send/message/markRead/read/error, notification:new
 
 ## Database Schema (Current Final)
 - User: name, email sparse unique, googleId sparse unique, phone unique required, role customer/provider, profilePicture, city (Pakistan city), location Point [lng,lat] 2dsphere, isOnline, isVerified, category plumber/electrician/mechanic, radiusKm 2-25, yearsExperience 0-50, defaultVisitingCharge 100-5000 default 500 PKR, documentUrl, verificationStatus not_submitted/pending/approved/rejected, rating 0-5 avg, reviews count
@@ -43,7 +43,7 @@ Phase 10 Completed — Site 100% functional end-to-end with city-based filtering
 - Job: request unique ref, customer ref, provider ref, offer ref, status on_the_way/arrived/in_progress/completed, statusHistory, completedAt
 - Message: job ref indexed, sender ref, text 1-2000, readAt, job+createdAt index
 - Review: job ref, fromUser ref, toUser ref, rating 1-5 integer, comment max 500, unique compound job+fromUser
-- Notification: user indexed, type enum [new_offer, offer_accepted, offer_rejected, request_new, request_cancelled, job_status_update, new_message], title, body, relatedId, isRead
+- Notification: user indexed, type enum [new_offer, offer_accepted, offer_rejected, offer_declined, request_new, request_cancelled, job_status_update, new_message, new_rating], title, body, relatedId, isRead
 
 ## Environment Variables
 Backend: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET (64 hex), GOOGLE_CLIENT_ID (optional), OTP_EXPIRY_MINUTES=5, CLOUDINARY_CLOUD_NAME/KEY/SECRET (optional mock), ADMIN_SECRET (optional dev open + auto-verify)
@@ -170,8 +170,37 @@ This was a dedicated bug-fix pass, not a new feature phase. Core functionality a
 
 **Deliverable:** All 5 bugs fixed, verified live with two real sessions (simulated via automated API + socket test), project_context.md updated.
 
+## Bidirectional Activity Sync & Workflow Completion (2026-08-20) - Refinement Pass
+
+A completion/polish pass on the core job lifecycle so BOTH sides see each other's actions live, with persisted notifications and zero dead ends. All wiring verified with an automated two-session E2E (`backend/tests/e2e-bidirectional.js`, REST+Socket clients = two real browser sessions, **48/48 checks PASS**) against the live dev server (`backend/dev-inmemory.js` = real server + mongodb-memory-server, no external DB needed).
+
+**New backend capability (genuinely missing):**
+- `PATCH /api/offers/:id/decline` (offerController.declineOffer + route) — customer-only via roleCheck, request-owner-only, offer must be `pending`, request must be `pending`. Sets offer `rejected`, emits `offer:declined` to that specific provider's room only (provider B did NOT receive it — verified), persists `offer_declined` notification. Customer NOT blocked from accepting a different offer after declining (verified — accepted offer #2 same request).
+- Re-offer after decline: `createOffer` now REVIVES a `rejected` offer (unique compound request+provider index prevents a second insert) with the new price/ETA/status pending instead of 400 — decline → second offer → accept flow verified (same offer _id revived with new price 500).
+- New Notification types: `offer_declined` (customer declined a specific offer), `new_rating` ("You received a new rating" to the rated party, wired in reviewController via existing notify utility).
+- Request cancel (pre-existing) verified: pending offers auto-`rejected`, EVERY offering provider gets `request:cancelled` socket + persisted `request_cancelled` notification, no dangling pending offers.
+
+**Frontend wiring (store + screens):**
+- Part A — Offer accept → provider details live for customer: verified accept → navigate(`activeJob`) shows name/category/rating/avatar + phone (contact unlock) + "on_the_way" + live map. ALSO FIXED the direct-booking DEAD END: `AvailableProvidersScreen.handleBook` dispatches `ufix:booked` window event that NOTHING listened to → now `store.directBookRequest()` does real direct-accept → refreshJobs → setActiveJobId → auto-navigate to Active Job (contact unlocked), toast on failure instead of blocking `alert()`.
+- Part B — Completion moment: `job:statusUpdate` handler now detects `completed` on BOTH sides → prominent toast + chime → AUTO-navigates to the Rating screen (customer rates provider, provider rates customer). RatingScreen made role-aware (peer name/avatar/submit label per role). Provider's own completion path (`updateJobStatus`) converges on the same Rating screen (idempotent with the socket handler).
+- Part C — Provider activity view: NEW "Your offers · live" section on ProviderHome (MyOfferCard) showing every offer the provider sent with a live fate badge — `⏳ Waiting` / `✓ Accepted` (deep-links to Active Job) / `✗ Declined` / `Not selected` / `Request cancelled` (terminal ones dismissible). State `store.myOffers` persisted to localStorage, fed by sendOffer response + offer:accepted / offer:declined / offer:rejected / request:cancelled socket events. Customer-side: declined offers vanish instantly and are filtered from the 2s poll + socket merge (adapter status field) so they never reappear; request stays open with remaining offers.
+- Part D — lifecycle table verified row-by-row (request posted, offer sent, offer declined, offer accepted [+ Not selected for others], request cancelled, status advances forward-only with live timeline both sides, job completed → dual rating prompts, rating submitted → new_rating notification to the other party).
+- NotificationBell tap-to-navigate now actually works per type (new_offer → Offers; offer_accepted / job_status_update → Active Job w/ silent jobs-tab fallback; request_new/offer outcomes → provider home; new_message → chat tab; new_rating → jobs tab), with icons for `offer_declined` + `new_rating`.
+- `lib/sound.ts` (new): shared playAlert/vibrateAlert/notifyAlert (patterns: new-request / positive / negative) — replaces the triplicated inline Web Audio blocks (store request:new, provider home, and now also offer accepted/declined/completed).
+- Live-preview safe API/socket URL resolution (api.ts/socket.ts): on port-proxied hosts (`{port}-{sandbox}.e2b.app`) derive the backend origin from the hostname (port 5000) since the browser can't reach sandbox localhost.
+
+**Dead/unnecessary UI removed (Part E):**
+- `ufix:booked` window event dispatch (no listener anywhere) + blocking `alert()` in AvailableProvidersScreen → replaced by `store.directBookRequest`.
+- Customer "Mark as completed & rate" button on ActiveJob (visible at arrived/in_progress) — fired POST rate while job was still in_progress → guaranteed 400 → store then FAKED completion locally. Removed; rating now auto-prompts on real completion, with "Rate your experience ⭐" fallback when status is completed, and "Rate now" on unrated completed job cards (openJobRating).
+- NotificationBell onTap comment-wall that only closed the dropdown → real navigation per type.
+- Triplicated sound/vibration code → lib/sound.ts helper.
+- Dead empty useEffect + convoluted operator-precedence basePrice expression in RequestCard → cleaned (price still defaults from provider profile defaultVisitingCharge, fully editable — BUG 3 preserved).
+
+**Verification (automated two-session E2E, 48/48 PASS):** request:new to matching provider → edited-price offer (550) → decline (403 guard for provider role, 400 on re-decline, request stays pending) → offer:declined targeted to that provider only + persisted offer_declined bell entry → second offer 500 revived (customer sees 2 pending incl. provider B's) → accept → offer:accepted to A / offer:rejected to B / job created on_the_way / GET /api/jobs/:id shows provider name+rating+phone + contactUnlocked → status arrived→in_progress live each side → backward 400 → completed to BOTH → both rate (duplicate 400, avg aggregated 5.0/1) → new_rating live + persisted on both → completed job in BOTH order histories → 2nd request → offer → cancel → request:cancelled + persisted request_cancelled + no dangling pending offers + cancelled entry in customer history.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
+- [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix, request expiry auto-cancel after 15 min, provider busy check (one active job), price editable in profile edit
 

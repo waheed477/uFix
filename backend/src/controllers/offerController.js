@@ -144,17 +144,36 @@ const createOffer = async (req, res) => {
     }
 
     // Check duplicate offer (compound index also enforces, but check for clear message)
+    // Bidirectional Sync pass: if provider's previous offer was REJECTED (customer declined it,
+    // or request was closed/re-opened), allow them to RE-OFFER with a new price/ETA by reviving
+    // the same offer document (unique compound index request+provider means we cannot insert a
+    // second document for the same pair). A decline -> second offer -> accept flow is the
+    // expected UX per the workflow completion pass.
+    let revivedExistingOffer = false;
     const existingOffer = await Offer.findOne({ request: requestId, provider: req.user.id });
     if (existingOffer) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'You have already submitted an offer on this request. A provider cannot offer twice on same request.',
-        existingOfferId: existingOffer._id
-      });
+      if (existingOffer.status !== 'rejected') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'You have already submitted an offer on this request. A provider cannot offer twice on same request.',
+          existingOfferId: existingOffer._id,
+          existingStatus: existingOffer.status
+        });
+      }
+      // Revive the rejected offer as a fresh pending offer with new price/ETA
+      existingOffer.visitingCharge = charge;
+      existingOffer.etaMinutes = eta;
+      existingOffer.status = 'pending';
+      existingOffer.createdAt = new Date(); // bump so it sorts as newest for the customer
+      await existingOffer.save();
+      revivedExistingOffer = true;
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`♻️ Offer ${existingOffer._id} revived (was rejected) with new charge PKR ${charge} for request ${requestId}`);
+      }
     }
 
-    // Create offer
-    const offer = new Offer({
+    // Create offer (or reuse revived one)
+    const offer = revivedExistingOffer ? existingOffer : new Offer({
       request: requestId,
       provider: req.user.id,
       visitingCharge: charge,
@@ -162,7 +181,9 @@ const createOffer = async (req, res) => {
       status: 'pending'
     });
 
-    await offer.save();
+    if (!revivedExistingOffer) {
+      await offer.save();
+    }
 
     await offer.populate('provider', 'name category rating reviews profilePicture isVerified isOnline');
     await offer.populate('request', 'category description location address customer');
@@ -637,8 +658,132 @@ const acceptOffer = async (req, res) => {
   }
 };
 
+/**
+ * @route PATCH /api/offers/:id/decline
+ * @desc Customer declines ONE specific pending offer on their request.
+ *       The request stays open — other offers remain pending and the customer
+ *       can still accept a different offer on the same request.
+ * @access Private, customer-only, only request owner
+ *
+ * NEW — Bidirectional Activity Sync & Workflow Completion pass (Part C)
+ * - Sets offer status to 'rejected' (same terminal state as not-selected)
+ * - Emits 'offer:declined' socket event to that specific provider's room only
+ * - Persists 'offer_declined' notification so the provider sees it in the bell
+ *   even if they are offline when it happens
+ */
+const declineOffer = async (req, res) => {
+  try {
+    const { id: offerId } = req.params;
+
+    const offer = await Offer.findById(offerId).populate('request');
+
+    if (!offer) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Offer not found'
+      });
+    }
+
+    const request = offer.request;
+
+    if (!request) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Associated request not found for this offer'
+      });
+    }
+
+    // Only the request owner (customer) can decline offers on it
+    if (request.customer.toString() !== req.user.id.toString()) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Access denied. Only the request owner can decline offers.'
+      });
+    }
+
+    // Only pending offers can be declined (accepted/already-rejected are terminal)
+    if (offer.status !== 'pending') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Cannot decline offer with status ${offer.status}. Only pending offers can be declined.`,
+        currentStatus: offer.status
+      });
+    }
+
+    // The request itself must still be open for offers
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Request is no longer pending (status: ${request.status}). Its offers are already settled.`,
+        currentStatus: request.status
+      });
+    }
+
+    offer.status = 'rejected';
+    await offer.save();
+
+    // --- Socket.io: Emit offer:declined to the specific provider's room ---
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const providerId = offer.provider.toString();
+        io.to(`user:${providerId}`).emit('offer:declined', {
+          offerId: offer._id,
+          requestId: request._id,
+          category: request.category,
+          visitingCharge: offer.visitingCharge,
+          city: request.city,
+          message: 'Customer declined your offer. You may send a new offer with an updated price.'
+        });
+
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`📤 offer:declined emitted to user:${providerId} for offer ${offer._id} (request ${request._id})`);
+        }
+
+        // --- Notification Persistence: notify the declined provider ---
+        try {
+          await createNotification({
+            userId: providerId,
+            type: 'offer_declined',
+            title: 'Offer declined',
+            body: `Customer declined your offer of PKR ${offer.visitingCharge} for the ${request.category} request${request.city ? ` in ${request.city}` : ''}. You can send a revised offer.`,
+            relatedId: request._id
+          });
+        } catch (notifyErr) {
+          console.error('Notification creation for offer:declined failed:', notifyErr.message);
+        }
+      }
+    } catch (socketErr) {
+      console.error('Socket emit offer:declined failed:', socketErr.message);
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Offer declined. The request remains open for other or revised offers.',
+      offer: {
+        id: offer._id,
+        request: request._id,
+        status: offer.status,
+        visitingCharge: offer.visitingCharge,
+        etaMinutes: offer.etaMinutes
+      },
+      requestStatus: request.status,
+      note: 'Customer can still accept a different offer, and the provider may send a revised offer.'
+    });
+
+  } catch (error) {
+    console.error('DeclineOffer error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to decline offer',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
 module.exports = {
   createOffer,
   getOffersForRequest,
-  acceptOffer
+  acceptOffer,
+  declineOffer
 };

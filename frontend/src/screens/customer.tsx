@@ -254,8 +254,11 @@ export function OffersScreen() {
         if (isInitial) setLoadingOffers(true);
         const data = await api.offers.getForRequest(effectiveRequestId);
         const backendOffers = data.offers || [];
-        const adapted: Offer[] = backendOffers.map((o: any) => adaptBackendOfferToFrontendOffer(o, { category: request?.category }));
-        if (isMounted) { setOffers(adapted); console.log(`[OffersScreen] Fetched ${adapted.length} offers for ${effectiveRequestId} city ${location.city}`); }
+        // Bidirectional Sync: hide offers that were declined/rejected - a declined offer must not
+        // reappear on the customer's screen via polling (request stays open for the remaining ones)
+        const pendingOnly = backendOffers.filter((o: any) => o.status !== 'rejected');
+        const adapted: Offer[] = pendingOnly.map((o: any) => adaptBackendOfferToFrontendOffer(o, { category: request?.category }));
+        if (isMounted) { setOffers(adapted); console.log(`[OffersScreen] Fetched ${adapted.length} pending offers for ${effectiveRequestId} city ${location.city}`); }
       } catch (err: any) { console.error('Failed to fetch offers', err); } finally { if (isInitial && isMounted) setLoadingOffers(false); }
     };
     fetchOffers(true);
@@ -278,7 +281,7 @@ export function OffersScreen() {
     if (request && request.offers && request.offers.length > 0) {
       setOffers(prev => {
         const existingIds = new Set(prev.map(o => o.id));
-        const newOffers = request.offers.filter(o => !existingIds.has(o.id));
+        const newOffers = request.offers.filter(o => !existingIds.has(o.id) && o.status !== 'rejected');
         if (newOffers.length > 0) return [...prev, ...newOffers];
         return prev;
       });
@@ -337,7 +340,7 @@ export function OffersScreen() {
           elapsed ? <EmptyState icon={<ClockIcon className="h-9 w-9" />} title={`No offers yet in ${location.city}`} subtitle={`${location.city} pros are being notified. Offers will appear live within 2 seconds.`} /> :
           <div className="flex items-center justify-center gap-2.5 py-4"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand-600" /></span><span className="text-sm font-semibold text-ink-600">Finding {meta.plural.toLowerCase()} in {location.city}…</span></div>
         ) : (
-          <div className="space-y-3">{sortedOffers.map((o,i)=><OfferCard key={o.id} offer={o} index={i} isAccepting={isAccepting} onAccept={()=>acceptOffer(request.id,o)} onDecline={()=>declineOffer(request.id,o.id)} />)}</div>
+          <div className="space-y-3">{sortedOffers.map((o,i)=><OfferCard key={o.id} offer={o} index={i} isAccepting={isAccepting} onAccept={()=>acceptOffer(request.id,o)} onDecline={()=>{ setOffers(prev=>prev.filter(x=>x.id!==o.id)); declineOffer(request.id,o.id); }} />)}</div>
         )}
       </div>
       <div className="border-t border-ink-100 bg-white px-4 py-3">
@@ -351,7 +354,7 @@ export function OffersScreen() {
 }
 
 export function AvailableProvidersScreen() {
-  const { back, jobs, activeRequestId, location, draftCategory, isLoading } = useApp();
+  const { back, jobs, activeRequestId, location, draftCategory, isLoading, directBookRequest } = useApp();
   const [providers, setProviders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [bookingId, setBookingId] = useState<string | null>(null);
@@ -384,17 +387,13 @@ export function AvailableProvidersScreen() {
 
   const handleBook = async (provider: any) => {
     if (!effectiveRequestId) return;
+    // Bidirectional Sync (Part A fix): directBookRequest now performs the full
+    // accept → contact-unlock → auto-navigate-to-Active-Job sequence in the store.
+    // (Previously this dispatched a `ufix:booked` window event that nothing listened to,
+    // plus a blocking alert() on failure — both removed as dead-end UI.)
     try {
       setBookingId(provider.id);
-      const res = await api.requests.directAccept(effectiveRequestId, provider.id);
-      console.log('[AvailableProviders] Direct accept success', res);
-      // The store's refreshJobs and socket offer:accepted will handle navigation to activeJob
-      // For now, show toast and rely on store's offer:accepted handler to navigate
-      // We can also manually navigate after small delay
-      window.dispatchEvent(new CustomEvent('ufix:booked', { detail: { providerId: provider.id } }));
-    } catch (err: any) {
-      console.error('Direct booking failed', err);
-      alert(err.message || 'Failed to book provider');
+      await directBookRequest(effectiveRequestId, provider.id);
     } finally {
       setBookingId(null);
     }
