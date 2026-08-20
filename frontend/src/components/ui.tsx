@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 import { cn } from "@/utils/cn";
 import type { Category, JobStatus } from "@/lib/types";
@@ -224,20 +225,35 @@ export function Avatar({
   size = 44,
   online,
   className,
+  src,
 }: {
   initials: string;
   color: string;
   size?: number;
   online?: boolean;
   className?: string;
+  /** Optional photo URL. Initials remain the design default and are the fallback when
+      src is missing or fails to load (e.g. dev Cloudinary mock URLs). Pre-Deploy Item 2. */
+  src?: string;
 }) {
+  const [imgOk, setImgOk] = useState(true);
+  useEffect(() => { setImgOk(true); }, [src]);
   return (
     <span className={cn("relative inline-flex shrink-0", className)} style={{ width: size, height: size }}>
       <span
-        className="flex h-full w-full items-center justify-center rounded-full font-display font-semibold text-white"
+        className="flex h-full w-full items-center justify-center overflow-hidden rounded-full font-display font-semibold text-white"
         style={{ background: `linear-gradient(135deg, ${color}, ${color}cc)`, fontSize: size * 0.34 }}
       >
-        {initials}
+        {src && imgOk ? (
+          <img
+            src={src}
+            alt=""
+            className="h-full w-full object-cover"
+            onError={() => setImgOk(false)}
+          />
+        ) : (
+          initials
+        )}
       </span>
       {online !== undefined && (
         <span

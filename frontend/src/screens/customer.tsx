@@ -17,6 +17,7 @@ import {
   Button,
   CategoryIcon,
   ChevronLeftIcon,
+  ChevronRightIcon,
   ClockIcon,
   CloseIcon,
   EmptyState,
@@ -39,11 +40,41 @@ function greeting() {
 }
 
 export function CustomerHome() {
-  const { user, navigate, draftCategory, setDraftCategory, location } = useApp();
+  const { user, navigate, draftCategory, setDraftCategory, location, jobs } = useApp();
   const firstName = user?.name.split(" ")[0] ?? "there";
   const markers: MapMarker[] = useMemo(() => [{ x: 50, y: 52, kind: "user" }], [location.coords]);
   const useGoogle = isGoogleMapsAvailable();
   const [onlineCount, setOnlineCount] = useState<number | null>(null);
+
+  // Pre-Deploy Item 3: compact reminder on Home while a request is open / a job is active.
+  // One line + tap target only - the full content stays on the Jobs tab / Offers / Active Job.
+  const openRequest = useMemo(
+    () => jobs.find((j: any) => j._originalStatus === 'pending' || j.status === 'open') || null,
+    [jobs]
+  );
+  const activeJobLike = useMemo(
+    () => (openRequest ? null : jobs.find((j: any) => ["accepted", "on_the_way", "arrived", "in_progress"].includes(j.status)) || null),
+    [jobs, openRequest]
+  );
+  const requestReminder = openRequest ? (
+    <button
+      onClick={() => navigate("offers")}
+      className="tap-highlight-none flex w-full items-center gap-2.5 rounded-2xl bg-white/95 px-4 py-3 shadow-soft backdrop-blur active:scale-[0.99]"
+    >
+      <span className="relative flex h-2.5 w-2.5 shrink-0"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" /></span>
+      <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-ink-900">You have an open request — tap to view offers</span>
+      <ChevronRightIcon className="h-4 w-4 shrink-0 text-ink-400" />
+    </button>
+  ) : activeJobLike ? (
+    <button
+      onClick={() => navigate("activeJob")}
+      className="tap-highlight-none flex w-full items-center gap-2.5 rounded-2xl bg-white/95 px-4 py-3 shadow-soft backdrop-blur active:scale-[0.99]"
+    >
+      <span className="relative flex h-2.5 w-2.5 shrink-0"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" /></span>
+      <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-ink-900">Active job in progress — tap to open</span>
+      <ChevronRightIcon className="h-4 w-4 shrink-0 text-ink-400" />
+    </button>
+  ) : null;
 
   useEffect(() => {
     const fetchOnline = async () => {
@@ -94,7 +125,8 @@ export function CustomerHome() {
               })}
             </div>
           </div>
-          <div className="absolute inset-x-0 bottom-5 z-20 px-4">
+          <div className="absolute inset-x-0 bottom-5 z-20 space-y-2.5 px-4">
+            {requestReminder}
             <button onClick={() => navigate("newRequest")} className="tap-highlight-none flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-accent-400 to-accent-500 font-display text-base font-bold text-ink-950 shadow-[0_16px_40px_-10px_rgba(249,143,7,0.6)] active:scale-[0.98]">
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink-950 text-accent-400"><PlusIcon className="h-4 w-4" /></span>
               Request a service in {location.city}
@@ -134,7 +166,8 @@ export function CustomerHome() {
               })}
             </div>
           </div>
-          <div className="absolute inset-x-0 bottom-5 z-20 px-4">
+          <div className="absolute inset-x-0 bottom-5 z-20 space-y-2.5 px-4">
+            {requestReminder}
             <button onClick={() => navigate("newRequest")} className="tap-highlight-none flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-accent-400 to-accent-500 font-display text-base font-bold text-ink-950 shadow-[0_16px_40px_-10px_rgba(249,143,7,0.6)] active:scale-[0.98]">
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink-950 text-accent-400"><PlusIcon className="h-4 w-4" /></span>
               Request a service in {location.city}

@@ -29,6 +29,7 @@ export interface User {
   city?: string;
   role: Role;
   avatar: string;
+  profilePicture?: string;
   color: string;
   rating: number;
   reviews: number;

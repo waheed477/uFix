@@ -48,7 +48,7 @@ function MenuItem({
 }
 
 export function ProfileTab() {
-  const { user, navigate, logout, jobs, location } = useApp();
+  const { user, navigate, logout, jobs, location, uploadProfilePicture, isLoading } = useApp();
   const [fullProfile, setFullProfile] = useState<any>(null);
 
   // Optimized: Show user immediately from store (no loading spinner for whole screen)
@@ -112,7 +112,27 @@ export function ProfileTab() {
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800 p-5 text-white shadow-float">
           <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
           <div className="relative flex items-center gap-4">
-            <Avatar initials={displayUser.avatar} color={displayUser.color} size={64} className="ring-4 ring-white/20" />
+            {/* Pre-Deploy Item 2: tap-to-change photo. Reuses the existing hidden file-input
+                pattern (onboarding document upload) + the long-existing POST /profile/picture
+                endpoint. Initials remain the fallback if the uploaded URL can't load. */}
+            <label className="relative flex shrink-0 cursor-pointer flex-col items-center gap-1" title="Tap to change photo">
+              <Avatar initials={displayUser.avatar} color={displayUser.color} size={64} className="ring-4 ring-white/20" src={displayUser.profilePicture} />
+              <span className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-white text-[11px] shadow-md">
+                {isLoading?.['picture'] ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink-300 border-t-brand-600" /> : '📷'}
+              </span>
+              <span className="text-[10px] font-medium text-white/70">{isLoading?.['picture'] ? 'Uploading…' : 'Change photo'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={!!isLoading?.['picture']}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadProfilePicture(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="truncate font-display text-lg font-bold">{displayUser.name}</h2>
@@ -200,7 +220,6 @@ export function ProfileTab() {
 export function EditProfileScreen() {
   const { user, updateProfile, back, location } = useApp();
   const [name, setName] = useState(user?.name ?? "");
-  const [phone, setPhone] = useState(user?.phone ?? "");
   // Post-Audit Fix P4: city is now editable here (same Pakistan-cities vocabulary as onboarding)
   const [city, setCity] = useState(user?.city ?? location.city ?? "");
   const isProvider = user?.role === "provider";
@@ -219,7 +238,7 @@ export function EditProfileScreen() {
 
       <div className="flex-1 overflow-y-auto p-4">
         <div className="flex flex-col items-center py-4">
-          <Avatar initials={user?.avatar ?? "?"} color={user?.color ?? "#167a6c"} size={80} online={isProvider ? user?.isOnline : undefined} />
+          <Avatar initials={user?.avatar ?? "?"} color={user?.color ?? "#167a6c"} size={80} online={isProvider ? user?.isOnline : undefined} src={user?.profilePicture} />
           <p className="mt-3 flex items-center gap-1 text-xs font-medium text-ink-400">
             <Stars value={user?.rating ?? 4.8} size={13} /> {user?.rating} · {user?.reviews} reviews
           </p>
@@ -232,7 +251,16 @@ export function EditProfileScreen() {
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-ink-700">Phone number</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" className="h-14 w-full rounded-2xl border-2 border-ink-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500" />
+            {/* Pre-Deploy Fix (Item 1): phone is the LOGIN IDENTITY. The backend deliberately
+                ignores it in PATCH /profile (a real change needs a fresh OTP to the NEW number -
+                out of scope). Previously this was an editable input whose value was silently
+                accepted-and-discarded (worse: it desynced local state from the backend until
+                reload). Now: honest read-only display, no dead-end editing. */}
+            <div className="flex h-14 w-full items-center justify-between rounded-2xl border-2 border-ink-100 bg-ink-50 px-4">
+              <span className="text-[15px] font-medium text-ink-600">{user?.phone ?? "—"}</span>
+              <span className="rounded-full bg-ink-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-ink-400">Login ID</span>
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-400">Phone number cannot be changed — it is used for login verification.</p>
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-ink-700">City</label>
@@ -266,7 +294,7 @@ export function EditProfileScreen() {
       </div>
 
       <div className="border-t border-ink-100 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button full size="lg" disabled={!name.trim() || !city.trim()} onClick={() => { updateProfile(name.trim(), phone.trim(), city.trim()); back(); }}>
+        <Button full size="lg" disabled={!name.trim() || !city.trim()} onClick={() => { updateProfile(name.trim(), city.trim()); back(); }}>
           Save changes
         </Button>
       </div>

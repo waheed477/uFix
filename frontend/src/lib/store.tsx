@@ -142,7 +142,8 @@ interface AppContextValue {
   // auth - real backend
   completeAuth: (role: Role, name: string, phone: string, city?: string) => void; // kept for compatibility, but now does real logic via login
   completeProviderSetup: (category: Category, radiusKm: number) => void;
-  updateProfile: (name: string, phone: string, city?: string) => void;
+  updateProfile: (name: string, city?: string) => void;
+  uploadProfilePicture: (file: File) => Promise<string | null>;
   toggleOnline: () => void;
   logout: () => void;
 
@@ -1107,26 +1108,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const updateProfile = useCallback(async (name: string, phone: string, city?: string) => {
+  const updateProfile = useCallback(async (name: string, city?: string) => {
     try {
       setLoading('profile', true);
       // Post-Audit Fix P4: city is editable now. Backend PATCH /api/users/profile accepts city.
+      // Pre-Deploy Fix (Item 1): the `phone` parameter is GONE. The backend PATCH ignores phone
+      // (login identity - changing it needs a full re-verification flow, out of scope), and the
+      // old code worse than ignored it: it wrote the typed phone into local state + storedUser,
+      // so the UI displayed a number the backend never saved - a true silent desync until reload.
       const cityTrimmed = city?.trim();
       const willChangeCity = !!cityTrimmed && cityTrimmed !== user?.city;
       await api.users.updateProfile(willChangeCity ? { name, city: cityTrimmed } : { name });
-      // Note: phone update not supported via PATCH /api/users/profile per backend (only name, city, profilePicture, isOnline)
-      // So we only update name locally
       setUser(prev => prev ? {
         ...prev,
         name,
-        phone,
         ...(willChangeCity ? { city: cityTrimmed } : {}),
         avatar: name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()
       } : prev);
 
       const stored = getStoredUser();
       if (stored) {
-        setStoredUser({ ...stored, name, phone, ...(willChangeCity ? { city: cityTrimmed } : {}) });
+        setStoredUser({ ...stored, name, ...(willChangeCity ? { city: cityTrimmed } : {}) });
       }
 
       // City change => move the map + stored coordinates in ONE atomic location PATCH (P3 pattern),
@@ -1157,6 +1159,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLoading('profile', false);
     }
   }, [user]);
+
+  // Pre-Deploy Fix (Item 2): wire the EXISTING POST /users/profile/picture endpoint to UI.
+  // Updates user + storedUser so the photo renders via Avatar's optional `src` everywhere
+  // we pass it; initials stay the fallback (mock Cloudinary URLs in dev return dummy URLs,
+  // so Avatar hides broken images via onError -> initials).
+  const uploadProfilePicture = useCallback(async (file: File) => {
+    try {
+      setLoading('picture', true);
+      const res = await api.users.uploadPicture(file);
+      const url = res?.profilePicture || res?.user?.profilePicture;
+      if (!url) throw new Error('Upload succeeded but no picture URL returned');
+      setUser(prev => (prev ? { ...prev, profilePicture: url } : prev));
+      const stored = getStoredUser();
+      if (stored) setStoredUser({ ...stored, profilePicture: url });
+      showToast('Profile photo updated', 'check');
+      return url as string;
+    } catch (err: any) {
+      console.error('Profile picture upload failed', err);
+      showToast(err.message || 'Photo upload failed', 'info');
+      return null;
+    } finally {
+      setLoading('picture', false);
+    }
+  }, [showToast]);
 
   const toggleOnline = useCallback(async () => {
     if (!user) return;
@@ -1917,6 +1943,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     completeAuth,
     completeProviderSetup,
     updateProfile,
+    uploadProfilePicture,
     toggleOnline,
     logout,
     setTab,

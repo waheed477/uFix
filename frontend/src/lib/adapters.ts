@@ -89,6 +89,7 @@ export const adaptBackendUserToFrontendUser = (backendUser: any): User => {
     phone,
     city,
     role,
+    profilePicture,
     avatar: getInitials(name),
     color: stringToColor(name),
     rating,

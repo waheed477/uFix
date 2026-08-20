@@ -292,12 +292,47 @@ Two CONFIRMED regressions reported by the user; both root-caused, fixed, live-te
 - `npm run build` OK (498.90 kB); bundle contains the guard markers ("keeping explicit selection", "Loading your session", completeAuth)
 - Honest disclosure: no browser exists in this sandbox, so the *pixel-level* absence of the button was verified via the build + source guards above; the role guard's server-side behavior was live-tested (B6). A 10-second visual confirmation on the deployed app is recommended.
 
-## TODO Next
+## Pre-Deployment Fixes & Known Limitations — 2026-08-20
+
+Final minor-issue pass from the 25-point manual verification. Item 1 mandatory; Items 2-4 judgment calls (fixed vs. documented).
+
+### Item 1 — Phone edit dead-end FIXED (mandatory)
+Worse than reported: the editable phone input wasn't merely ignored by the backend — `store.updateProfile` wrote the typed phone into `user` state AND `storedUser`, so the whole UI displayed a number the backend never saved (true silent desync until reload/restore). Fix (chosen: read-only, since a real phone change = login-identity migration requiring fresh OTP to the new number — out of scope):
+- `EditProfileScreen`: phone input removed → read-only display with "Login ID" chip + note "Phone number cannot be changed — it is used for login verification."
+- `store.updateProfile(name, city?)` — phone parameter deleted from signature, context type, and all local writes.
+- Guard: `tests/pre-deploy-checks.js` P1a-P1c + P3 LIVE (PATCH {phone} → profile phone unchanged — the contract the UI now honestly reflects).
+
+### Item 2 — Profile picture upload FIXED (implemented, not documented-only)
+The endpoint (`POST /api/users/profile/picture`) + client method existed with zero callers. It qualified as a quick wire-up: a file-input pattern already exists (onboarding document upload) and `Avatar` needed only an additive optional `src`:
+- `Avatar` gained optional `src` (initials remain default; `onError` → initials fallback — important because dev Cloudinary mock URLs are dummy/non-loadable).
+- `User` type + adapter now carry `profilePicture` (adapter previously computed then dropped it).
+- `store.uploadProfilePicture(file)` → POST → updates user + storedUser + toast.
+- `ProfileTab`: avatar is now a tap-to-change control (camera badge + hidden file input + uploading state); `EditProfileScreen` avatar displays the photo read-only.
+- Live-verified: multipart upload → 200 + URL persisted on GET /profile; no-file → 400. Guard: pre-deploy-checks P2.
+
+### Item 3 — Active-request reminder on Customer Home FIXED (polish)
+`CustomerHome` now shows a ONE-LINE compact reminder above the "Request a service" button (both map branches): "You have an open request — tap to view offers" (→ Offers) or "Active job in progress — tap to open" (→ Active Job). No duplication of Jobs-tab content.
+
+### Item 4 — "My Offers" placement: KEPT on Provider Home (deliberate, documented)
+Not moved to the Jobs tab. Reason: moving risks destabilizing the Home layout for zero functional gain — seeing live offer fates (⏳ / ✓ / ✗ / Not selected / Request cancelled / ⏰ expired) on the provider's PRIMARY screen is arguably better UX (status is ambient, not buried). This is a placement choice, not a bug.
+
+## Known Limitations (deliberate — no surprises at deployment)
+- **Phone number is immutable in-app** — it is the login identity (JWT + OTP are keyed to it). Read-only by design (Item 1). A change-my-number flow (re-verification) is a future feature.
+- **Dev mode Cloudinary is mocked** — uploads return dummy URLs when CLOUDINARY_* env vars are unset, so uploaded photos don't render in dev (avatars fall back to initials via onError). Set the 3 Cloudinary vars in production for real photo storage/display.
+- **Google Sign-In needs GOOGLE_CLIENT_ID** — backend returns a loud 500 without it; only the phone-OTP paths were live-testable in the sandbox. The Google path is code-wired identically (completeAuth + guard B5 covers all 3 call sites).
+- **Google Maps is optional** — free custom SVG city map by default; set VITE_GOOGLE_MAPS_API_KEY for real Google Maps (untested live, no key in sandbox).
+- **No background cron** — request expiry + availability are lazy-on-read (deliberate, same philosophy as no-Redis).
+- **"My Offers" lives on Provider Home** (Item 4 decision).
+
+**Verification:** new `tests/pre-deploy-checks.js` **5/5**; FULL regression re-run on final code: 48/48 + 39/39 + 12/12 + 6/6 + 8/8 guards = **118/118 green**; `npm run build` OK (502.48 kB). The two regression fixes (BUG A/B) and their guard suite were NOT touched (rules-compliant).
+
+
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
 - [x] Provider Availability Lock & Request Expiry pass - verified 39/39 E2E (2026-08-20)
 - [x] Location System Fixes - Post-Audit pass (P1-P5 + Decisions 6-7), regressions green (2026-08-20)
 - [x] Regression Fixes (BUG A: explicit city > GPS; BUG B: onboarding never hydrated user) - guarded 8/8 + full suites green (2026-08-20)
+- [x] Pre-Deployment pass: Item 1 phone dead-end FIXED (read-only), Item 2 photo upload wired live, Item 3 Home reminder added, Item 4 documented - 118/118 green (2026-08-20)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 
