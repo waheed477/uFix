@@ -35,6 +35,7 @@ const notificationSchema = new mongoose.Schema({
         'offer_accepted',   // offer:accepted
         'offer_rejected',   // offer:rejected
         'offer_declined',   // offer:declined (customer declined a single offer - Bidirectional Sync pass)
+        'offer_withdrawn',  // offer:withdrawn (provider withdrew their own pending offer - 2026-08-21)
         'request_new',      // request:new
         'request_cancelled',// request:cancelled
         'request_expired',  // request:expired (lazy auto-expiry - Availability & Expiry pass)

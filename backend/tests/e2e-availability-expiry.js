@@ -10,13 +10,13 @@
  *   PROVIDER_BUSY / hasActiveJob:true), while free Provider B sees + offers freely.
  *   Then A COMPLETES the job -> lock releases (nearby shows requests again).
  *
- * Scenario B - AUTO-EXPIRY (lazy-check-on-read, REQUEST_EXPIRY_MINUTES=20):
+ * Scenario B - AUTO-EXPIRY (lazy-check-on-read, REQUEST_EXPIRY_MINUTES=2 as of 2026-08-21):
  *   A pending request with no accepted offer expires after its expiresAt. Uses the
  *   DEV-ONLY expiresInMinutes override (0.05 min = 3s, ignored in production) instead
  *   of manual DB pokes. Assert: stale request flips to cancelled('expired') on the
  *   next read, pending offers are rejected, request:expired + persisted
  *   request_expired notifications reach customer + offering providers, and offers/
- *   accepts after expiry return 400. Also proves the default 20-minute expiry.
+ *   accepts after expiry return 400. Also proves the default 2-minute expiry (demo value).
  *
  * Run: node tests/e2e-availability-expiry.js   (backend must be running on :5000)
  */
@@ -154,9 +154,9 @@ async function main() {
     body: { category: 'plumber', description: 'X: bathroom tap dripping', ...LAHORE, address: 'DHA,Lahore', city: 'Lahore' },
   });
   check('[A1] Request X created (201)', createX.status === 201, createX);
-  check('[A1] Request X has default expiresAt ~+20min', (() => {
+  check('[A1] Request X has default expiresAt ~+2min (demo value, see requestConfig.js warning)', (() => {
     const exp = new Date(createX.data.request.expiresAt).getTime() - Date.now();
-    return exp > 19 * 60 * 1000 && exp < 21 * 60 * 1000;
+    return exp > 1.9 * 60 * 1000 && exp < 2.1 * 60 * 1000;
   })(), createX.data.request.expiresAt);
   const reqX = createX.data.request.id.toString();
   await pReqNewA;
@@ -230,14 +230,14 @@ async function main() {
   console.log('\n=== Scenario B: Auto-Expiry (lazy check on read) ===\n');
 
   // B1 - default 20 min constant sanity (no override)
-  console.log('— B1. Default expiry = 20 min; junk override ignored —');
+  console.log('— B1. Default expiry = 2 min (demo value); junk override ignored —');
   const createV = await api('/api/requests', {
     method: 'POST', token: custZ.token,
     body: { category: 'plumber', description: 'V: geyser not heating', ...LAHORE, address: 'Iqbal Town,Lahore', city: 'Lahore', expiresInMinutes: 999 },
   });
   check('[B1] Request V created (201)', createV.status === 201, createV);
   const expV = new Date(createV.data.request.expiresAt).getTime() - Date.now();
-  check('[B1] expiresInMinutes=999 (>60) IGNORED -> default ~20min kept', expV > 19 * 60 * 1000 && expV < 21 * 60 * 1000, createV.data.request.expiresAt);
+  check('[B1] expiresInMinutes=999 (>60) IGNORED -> default ~2min kept', expV > 1.9 * 60 * 1000 && expV < 2.1 * 60 * 1000, createV.data.request.expiresAt);
   const reqV = createV.data.request.id.toString();
   // Cancel V immediately (Phase-4 one-open-request rule would block Z below otherwise)
   await api(`/api/requests/${reqV}/cancel`, { method: 'PATCH', token: custZ.token });

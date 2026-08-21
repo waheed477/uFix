@@ -52,6 +52,7 @@ const createNotification = async ({ userId, type, title, body, relatedId = null 
       'offer_accepted',
       'offer_rejected',
       'offer_declined',
+      'offer_withdrawn',  // offer:withdrawn (provider pulled own pending offer - 2026-08-21)
       'request_new',
       'request_cancelled',
       'request_expired',

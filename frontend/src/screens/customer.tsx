@@ -289,7 +289,10 @@ export function OffersScreen() {
         const backendOffers = data.offers || [];
         // Bidirectional Sync: hide offers that were declined/rejected - a declined offer must not
         // reappear on the customer's screen via polling (request stays open for the remaining ones)
-        const pendingOnly = backendOffers.filter((o: any) => o.status !== 'rejected');
+        // 2026-08-21: PENDING-ONLY now (was "not rejected") - a WITHDRAWN offer must not
+        // reappear here either; every terminal status (rejected/declined/withdrawn/expired)
+        // is filtered. Decline/withdraw/cancel all stay invisible to the customer after the fact.
+        const pendingOnly = backendOffers.filter((o: any) => o.status === 'pending');
         const adapted: Offer[] = pendingOnly.map((o: any) => adaptBackendOfferToFrontendOffer(o, { category: request?.category }));
         if (isMounted) { setOffers(adapted); console.log(`[OffersScreen] Fetched ${adapted.length} pending offers for ${effectiveRequestId} city ${location.city}`); }
       } catch (err: any) { console.error('Failed to fetch offers', err); } finally { if (isInitial && isMounted) setLoadingOffers(false); }
@@ -314,7 +317,7 @@ export function OffersScreen() {
     if (request && request.offers && request.offers.length > 0) {
       setOffers(prev => {
         const existingIds = new Set(prev.map(o => o.id));
-        const newOffers = request.offers.filter(o => !existingIds.has(o.id) && o.status !== 'rejected');
+        const newOffers = request.offers.filter(o => !existingIds.has(o.id) && o.status === 'pending');
         if (newOffers.length > 0) return [...prev, ...newOffers];
         return prev;
       });
@@ -336,7 +339,7 @@ export function OffersScreen() {
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-2xl">⏰</div>
             <h3 className="font-display text-base font-bold text-ink-900">Expired — no providers responded in time</h3>
-            <p className="max-w-[280px] text-sm text-ink-500">Requests stay live for 20 minutes. “{latestExpired.description}” got no accepted offer before it expired.</p>
+            <p className="max-w-[280px] text-sm text-ink-500">Requests auto-expire quickly if no provider responds in time. “{latestExpired.description}” got no accepted offer before it expired.</p>
             <Button size="sm" onClick={() => navigate("newRequest")}>Post again</Button>
             <Button size="sm" variant="outline" onClick={back}>Go to Home</Button>
           </div>

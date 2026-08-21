@@ -41,8 +41,10 @@ const offerSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: {
-      values: ['pending', 'accepted', 'rejected'],
-      message: 'Offer status must be pending, accepted, or rejected'
+      values: ['pending', 'accepted', 'rejected', 'withdrawn'],
+      // 'rejected' = declined by customer / not selected / request cancelled/expired (terminal);
+      // 'withdrawn' = the PROVIDER pulled their own pending offer back (2026-08-21 feature).
+      message: 'Offer status must be pending, accepted, rejected, or withdrawn'
     },
     default: 'pending'
   },

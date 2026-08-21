@@ -153,7 +153,7 @@ export const adaptBackendRequestToFrontendJob = (backendRequest: any, options: {
     providerAvatarInitials: backendRequest.acceptedProvider ? getInitials(backendRequest.acceptedProvider.name) : undefined,
     providerRating: backendRequest.acceptedProvider?.rating,
     // Availability & Expiry pass: carry cancellation reason + expiry so the UI can show
-    // "Expired" (auto, 20 min no-accept) vs "Cancelled" (user-initiated)
+    // "Expired" (auto-expired, REQUEST_EXPIRY_MINUTES) vs "Cancelled" (user-initiated)
     cancelledReason: backendRequest.cancelledReason || undefined,
     expiresAt: backendRequest.expiresAt ? toTimestamp(backendRequest.expiresAt) : undefined,
     // Keep backend raw for debugging

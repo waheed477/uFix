@@ -478,9 +478,12 @@ const acceptOffer = async (req, res) => {
       { $set: { status: 'accepted' } }
     );
 
-    // Reject all other offers on same request
+    // Reject all other PENDING offers on same request (2026-08-21 fix: the unfiltered
+    // updateMany used to also clobber 'withdrawn' - erasing the provider-initiated
+    // end-state and falsely notifying that provider as "not selected". Only pending
+    // offers ever become rejected here.)
     await Offer.updateMany(
-      { request: request._id, _id: { $ne: offer._id } },
+      { request: request._id, _id: { $ne: offer._id }, status: 'pending' },
       { $set: { status: 'rejected' } }
     );
 
@@ -522,8 +525,9 @@ const acceptOffer = async (req, res) => {
     try {
       const io = req.app.get('io');
       if (io) {
-        // Find other offers that were rejected
-        const otherOffers = await Offer.find({ request: request._id, _id: { $ne: offer._id } }).select('provider');
+        // Find other offers that were JUST rejected (pending-only above; withdrawn ones keep
+        // their distinct state and their provider is NOT falsely told "not selected")
+        const otherOffers = await Offer.find({ request: request._id, _id: { $ne: offer._id }, status: 'rejected' }).select('provider');
         otherProviderIds = [...new Set(otherOffers.map(o => o.provider.toString()))];
 
         // 1. Emit offer:accepted to accepted provider
@@ -823,9 +827,125 @@ const declineOffer = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /api/offers/:id/withdraw - provider withdraws their OWN pending offer (2026-08-21).
+ * Mirror of declineOffer, opposite direction (provider-initiated instead of customer-initiated):
+ *  - provider-only (route roleCheck), owner-only, pending-only
+ *  - status -> 'withdrawn' (a DISTINCT terminal state from 'rejected': rejected covers
+ *    declined-by-customer / not-selected / request-settled; withdrawn = provider pulled out)
+ *  - socket 'offer:withdrawn' -> the customer (their offers list updates live)
+ *  - persisted 'offer_withdrawn' notification -> the customer
+ */
+const withdrawOffer = async (req, res) => {
+  try {
+    const { id: offerId } = req.params;
+
+    const offer = await Offer.findById(offerId).populate('request');
+
+    if (!offer) {
+      return res.status(404).json({ status: 'error', message: 'Offer not found' });
+    }
+
+    const request = offer.request;
+    if (!request) {
+      return res.status(404).json({ status: 'error', message: 'Associated request not found for this offer' });
+    }
+
+    // Only the offer's OWN provider can withdraw it
+    if (offer.provider.toString() !== req.user.id.toString()) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Access denied. Only the provider who sent this offer can withdraw it.'
+      });
+    }
+
+    // Lazy expiry touch (same as decline) - withdrawing on a stale request flips it first;
+    // the checks below then correctly report the offer as already settled
+    await expireRequestIfStale(request, req.app.get('io'));
+
+    // Only pending offers can be withdrawn (accepted = job created; rejected/withdrawn = terminal)
+    if (offer.status !== 'pending') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Cannot withdraw offer with status ${offer.status}. Only pending offers can be withdrawn.`,
+        currentStatus: offer.status
+      });
+    }
+
+    // The request itself must still be open (belt-and-braces; a settled request settles offers too)
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Request is no longer pending (status: ${request.status}). Its offers are already settled.`,
+        currentStatus: request.status
+      });
+    }
+
+    offer.status = 'withdrawn';
+    await offer.save();
+
+    // --- Socket.io: tell the CUSTOMER their offers list changed (live, no refresh) ---
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const customerId = request.customer.toString();
+        io.to(`user:${customerId}`).emit('offer:withdrawn', {
+          offerId: offer._id,
+          requestId: request._id,
+          category: request.category,
+          visitingCharge: offer.visitingCharge,
+          providerId: offer.provider,
+          message: 'A provider withdrew their offer.'
+        });
+
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`📤 offer:withdrawn emitted to user:${customerId} for offer ${offer._id} (request ${request._id})`);
+        }
+
+        // --- Notification Persistence: notify the customer ---
+        try {
+          await createNotification({
+            userId: customerId,
+            type: 'offer_withdrawn',
+            title: 'Offer withdrawn',
+            body: `A provider withdrew their offer of PKR ${offer.visitingCharge} for your ${request.category} request${request.city ? ` in ${request.city}` : ''}. Your request stays open for other offers.`,
+            relatedId: request._id
+          });
+        } catch (notifyErr) {
+          console.error('Notification creation for offer:withdrawn failed:', notifyErr.message);
+        }
+      }
+    } catch (socketErr) {
+      console.error('Socket emit offer:withdrawn failed:', socketErr.message);
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Offer withdrawn. The request remains open for other providers.',
+      offer: {
+        id: offer._id,
+        request: request._id,
+        status: offer.status,
+        visitingCharge: offer.visitingCharge,
+        etaMinutes: offer.etaMinutes
+      },
+      requestStatus: request.status
+    });
+
+  } catch (error) {
+    console.error('WithdrawOffer error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to withdraw offer',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
+};
+
 module.exports = {
   createOffer,
   getOffersForRequest,
   acceptOffer,
-  declineOffer
+  declineOffer,
+  withdrawOffer
 };

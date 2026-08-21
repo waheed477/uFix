@@ -29,7 +29,7 @@ Phase 10 Completed — Site 100% functional end-to-end with city-based filtering
 - Users: GET /api/users/profile, PATCH /api/users/profile (name, city, profilePicture, isOnline), POST /api/users/profile/picture, PATCH /api/users/location {lng,lat}
 - Providers: PATCH /api/providers/setup {category, radiusKm, yearsExperience, defaultVisitingCharge}, POST /api/providers/document, GET /api/providers/verification-status, GET /api/providers/available?city=&category= (city-based online count + list with price), PATCH /api/providers/:id/verify, POST /api/providers/dev/verify-me (dev auto-verify)
 - Requests: POST /api/requests {category, description, lng, lat, address, city}, GET /api/requests/nearby (city+category), GET /api/requests/my, GET /api/requests/:id, PATCH /api/requests/:id/cancel, POST /api/requests/:id/direct-accept {providerId} (direct booking with price from profile)
-- Offers: POST /api/requests/:id/offers {visitingCharge, etaMinutes} (re-offer after decline revives rejected offer), GET /api/requests/:id/offers, PATCH /api/offers/:id/accept, PATCH /api/offers/:id/decline (customer-only, owner-only, pending-only, emits offer:declined + offer_declined notification)
+- Offers: POST /api/requests/:id/offers {visitingCharge, etaMinutes} (re-offer after decline revives rejected offer), GET /api/requests/:id/offers, PATCH /api/offers/:id/accept, PATCH /api/offers/:id/decline (customer-only, owner-only, pending-only, emits offer:declined + offer_declined notification), PATCH /api/offers/:id/withdraw (2026-08-21: provider-only, owner-only, pending-only -> status 'withdrawn', emits offer:withdrawn + offer_withdrawn notification to customer)
 - Jobs: GET /api/jobs/:id, PATCH /api/jobs/:id/status, GET /api/jobs/my/active, GET /api/jobs/history?status=all|completed|cancelled, POST /api/jobs/:jobId/rate, GET /api/jobs/:jobId/reviews
 - Messages: GET /api/jobs/:jobId/messages
 - Notifications: GET /api/notifications, PATCH /:id/read, PATCH /read-all
@@ -327,6 +327,31 @@ Not moved to the Jobs tab. Reason: moving risks destabilizing the Home layout fo
 **Verification:** new `tests/pre-deploy-checks.js` **5/5**; FULL regression re-run on final code: 48/48 + 39/39 + 12/12 + 6/6 + 8/8 guards = **118/118 green**; `npm run build` OK (502.48 kB). The two regression fixes (BUG A/B) and their guard suite were NOT touched (rules-compliant).
 
 
+## Post-Live-Testing Fixes: Offer Withdraw, 2-Min Expiry, Stale/Re-Notification — 2026-08-21
+
+Five issues from live testing on the deployed app. Root-caused, fixed, live-tested; new suite `backend/tests/offer-withdraw.js` (23 checks).
+
+### Issue 1 — Repeated provider notifications for stale/old requests: TWO root causes, both fixed
+1. **Frontend (primary):** ProviderHome alarm compared list LENGTH (`count up → beep`) with 5s polling — any count jump re-fired sound/vibration (stale request resurfacing, offline→online, finishing a job 0→N). Now **ID-based** (`knownRequestIdsRef` Set): first population after mount primes silently; only request IDs never seen this session trigger `notifyAlert`; already-known requests update silently each poll; the set prunes itself.
+2. **Backend (data):** requests created BEFORE the expiry feature have **no `expiresAt`** — lazy expiry judged them "not stale" forever, so old test requests stayed pending and kept resurfacing in nearby lists (exactly the "requests the current customer never made" symptom on the long-lived Render DB). `isStalePending` now falls back to `createdAt + REQUEST_EXPIRY_MINUTES` when `expiresAt` is missing, and the sweep query matches legacy docs explicitly. Verified live: a stale request never reaches nearby and flips to cancelled/expired on read.
+
+### Issue 2 — Request auto-expiry 20 → 2 minutes
+`utils/requestConfig.js` `REQUEST_EXPIRY_MINUTES = 2` (single constant; lazy-check-on-read design unchanged, no cron). **⚠️ In-code warning:** 2 minutes is a DEMO value for fast testing — raise to ~10-15 before real users. All lazy touchpoints unchanged and re-verified (nearby, getById, getMyRequests, offer create/accept/decline/withdraw). Customer-facing copy no longer hardcodes "20 minutes". Existing expiry suite's default-duration assertions updated (≈20 → ≈2; junk override still ignored).
+
+### Issue 3 — Customer cancel re-confirmed (no change needed)
+Visible "Cancel" action on the offers screen (`cancelRequest(request.id)`), PATCH /requests/:id/cancel live-verified (200 + `request:cancelled` to offering providers + "Request cancelled" badge).
+
+### Issue 4 — NEW: Provider can withdraw a sent offer (mirror of decline, opposite direction)
+- **Backend:** `PATCH /api/offers/:id/withdraw` — provider-only, owner-only (403), pending-only (400). Sets status **`withdrawn`** (NEW distinct terminal value; enums updated on Offer + Notification + `utils/notify.js`). Emits `offer:withdrawn` to the **customer** + persists `offer_withdrawn` bell. Lazy-expiry touch first, same as decline.
+- **Bug found & fixed while building this:** `acceptOffer`'s settle step used an UNFILTERED `updateMany(..., rejected)` that clobbered even `withdrawn` offers and falsely notified withdrawn providers as "not selected" — now pending-only, and the rejected-notify query is scoped to actually-rejected docs. (Cancel + expiry paths were already pending-only.)
+- **Frontend:** "Your offers · live" pending card gains a **Withdraw** action (spinner in-flight); new badge **"↩ Withdrawn by you"** (sky). Customer: store listens `offer:withdrawn` → removes the offer + toast; OffersScreen merges are now **pending-only** in both paths. Additions: `api.offers.withdraw`, `store.withdrawOffer`, `SentOfferStatus` + `withdrawn`.
+
+### Issue 5 — Three offer end-states distinct: RE-CONFIRMED (now enforced by test)
+Live suite proves one request's lifecycle yields **A=withdrawn, B=accepted, C=rejected** simultaneously; badges: **✗ Declined** (rose — customer did it) vs **↩ Withdrawn by you** (sky — provider did it) vs **Not selected** (grey — another accepted); plus pre-existing "Request cancelled" / "⏰ Request expired".
+
+**Verification (all live, final code):** offer-withdraw suite **23/23** + FULL regression: 48/48 + 39/39 + 12/12 + 6/6 + 8/8 + 5/5 + lifecycle 31/31 = **172/172 green**; `npm run build` OK (504.23 kB).
+
+## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
 - [x] Provider Availability Lock & Request Expiry pass - verified 39/39 E2E (2026-08-20)
@@ -334,6 +359,7 @@ Not moved to the Jobs tab. Reason: moving risks destabilizing the Home layout fo
 - [x] Regression Fixes (BUG A: explicit city > GPS; BUG B: onboarding never hydrated user) - guarded 8/8 + full suites green (2026-08-20)
 - [x] Pre-Deployment pass: Item 1 phone dead-end FIXED (read-only), Item 2 photo upload wired live, Item 3 Home reminder added, Item 4 documented - 118/118 green (2026-08-20)
 - [x] FINAL 26-point deployment verification: 118/118 suites + full lifecycle run (tests/final-lifecycle-run.js) 31/31 - READY (2026-08-20)
+- [x] Post-live-testing fixes: offer-withdraw endpoint + ID-based provider notify + legacy stale-request expiry + 2-min demo expiry - 172/172 green (2026-08-21)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

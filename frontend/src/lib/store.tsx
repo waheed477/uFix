@@ -156,6 +156,7 @@ interface AppContextValue {
   postRequest: (category: Category, description: string, location: GeoPoint, address: string) => void;
   acceptOffer: (jobId: string, offer: Offer) => void;
   declineOffer: (jobId: string, offerId: string) => void;
+  withdrawOffer: (offerId: string) => Promise<boolean>;
   cancelRequest: (jobId: string) => void;
   directBookRequest: (requestId: string, providerId: string) => Promise<boolean>;
   openActiveJob: () => Promise<boolean>;
@@ -556,6 +557,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast('Customer declined your offer — you can send a revised one', 'info');
     });
 
+    // Offer:withdrawn -> customer: a provider pulled their offer back (2026-08-21).
+    // Remove it from any open request's offers so the customer never sees a dead offer;
+    // the 2s OffersScreen poll also filters non-pending (belt-and-suspenders).
+    // Provider (multi-device): no-op beyond the PATCH-response badge update.
+    const offOfferWithdrawn = socketClient.on('offer:withdrawn', (data: any) => {
+      console.log('[Store] Received offer:withdrawn', data);
+      const withdrawnOfferId = data.offerId?.toString();
+      if (withdrawnOfferId) {
+        setJobs(prev => prev.map(j => (j.offers ? { ...j, offers: j.offers.filter((o: any) => o.id !== withdrawnOfferId) } : j)));
+        markMyOffers({ offerId: withdrawnOfferId }, 'withdrawn');
+      }
+      showToast('A provider withdrew their offer', 'info');
+    });
+
     // Request:closed → provider, request no longer available
     const offRequestClosed = socketClient.on('request:closed', (data: any) => {
       console.log('[Store] Received request:closed', data);
@@ -762,6 +777,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       offOfferAccepted();
       offOfferRejected();
       offOfferDeclined();
+      offOfferWithdrawn();
       offRequestClosed();
       offRequestCancelled();
       offRequestExpired();
@@ -1306,6 +1322,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLoading('declineOffer', false);
     }
   }, []);
+
+  // Provider withdraws their OWN pending offer (2026-08-21) - mirror of declineOffer,
+  // opposite direction (provider-initiated). On success the "Your offers" card flips to
+  // the distinct "Withdrawn by you" badge; the customer gets offer:withdrawn live (see the
+  // socket setup) so the offer disappears from their list WITH an explanation.
+  const withdrawOffer = useCallback(async (offerId: string) => {
+    try {
+      setLoading('withdrawOffer', true);
+      await api.offers.withdraw(offerId);
+      markMyOffers({ offerId }, 'withdrawn');
+      showToast('Offer withdrawn — the customer has been notified', 'info');
+      return true;
+    } catch (err: any) {
+      console.error('Withdraw offer failed', err);
+      showToast(err.message || 'Failed to withdraw offer', 'info');
+      return false;
+    } finally {
+      setLoading('withdrawOffer', false);
+    }
+  }, [markMyOffers, showToast]);
 
   const cancelRequest = useCallback(async (jobId: string) => {
     try {
@@ -1952,6 +1988,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     postRequest,
     acceptOffer,
     declineOffer,
+    withdrawOffer,
     cancelRequest,
     directBookRequest,
     openActiveJob,

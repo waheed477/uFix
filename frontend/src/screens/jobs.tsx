@@ -415,7 +415,7 @@ function JobCard({ job, onOpen }: { job: Job; onOpen?: () => void }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <p className="line-clamp-1 font-display text-sm font-bold text-ink-900">{job.description}</p>
-          {/* Expired (auto, no providers in 20 min) is distinguished from user-cancelled (Part 2) */}
+          {/* Expired (auto, no providers in time) is distinguished from user-cancelled (Part 2) */}
           {isExpired
             ? <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-700">⏰ Expired</span>
             : <StatusBadge status={job.status} className="shrink-0" />}
@@ -462,7 +462,7 @@ export function JobsTab() {
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-lg">⏰</div>
               <div className="min-w-0 flex-1">
                 <p className="font-display text-sm font-bold text-ink-900">Request expired</p>
-                <p className="mt-0.5 line-clamp-1 text-xs text-ink-600">No providers responded in 20 minutes — post it again to get fresh offers.</p>
+                <p className="mt-0.5 line-clamp-1 text-xs text-ink-600">No providers responded in time — post it again to get fresh offers.</p>
               </div>
               <button
                 onClick={() => navigate("newRequest")}

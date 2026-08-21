@@ -19,4 +19,7 @@ router.patch('/:id/accept', roleCheck('customer'), offerController.acceptOffer);
 // Decline a single pending offer - customer only (request stays open)
 router.patch('/:id/decline', roleCheck('customer'), offerController.declineOffer);
 
+// Withdraw own pending offer - provider only (request stays open) - 2026-08-21
+router.patch('/:id/withdraw', roleCheck('provider'), offerController.withdrawOffer);
+
 module.exports = router;

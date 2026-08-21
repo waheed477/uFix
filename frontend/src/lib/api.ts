@@ -295,6 +295,11 @@ export const api = {
       apiFetch(`/api/offers/${offerId}/decline`, {
         method: 'PATCH',
       }),
+    // Provider withdraws their OWN pending offer (2026-08-21)
+    withdraw: (offerId: string) =>
+      apiFetch(`/api/offers/${offerId}/withdraw`, {
+        method: 'PATCH',
+      }),
   },
 
   // Jobs

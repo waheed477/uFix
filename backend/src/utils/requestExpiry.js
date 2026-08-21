@@ -37,11 +37,21 @@ function resolveIO(passedIO) {
   }
 }
 
-const isStalePending = (request) =>
-  !!request &&
-  request.status === 'pending' &&
-  request.expiresAt &&
-  new Date(request.expiresAt).getTime() <= Date.now();
+// 2026-08-21 (Repeated-notification/stale-request fix): requests created BEFORE the
+// expiry feature shipped have NO expiresAt at all. Without a fallback they stayed
+// pending FOREVER and kept resurfacing in provider nearby lists (the "old test
+// requests keep notifying" bug). Treat a missing expiresAt as createdAt + window.
+const stalenessDeadlineMs = (request) => {
+  if (request.expiresAt) return new Date(request.expiresAt).getTime();
+  if (request.createdAt) return new Date(request.createdAt).getTime() + REQUEST_EXPIRY_MINUTES * 60 * 1000;
+  return null;
+};
+
+const isStalePending = (request) => {
+  if (!request || request.status !== 'pending') return false;
+  const deadline = stalenessDeadlineMs(request);
+  return !!deadline && deadline <= Date.now();
+};
 
 /**
  * Expire one request document if it is pending and past expiresAt.
@@ -138,10 +148,18 @@ const expireRequestIfStale = async (request, io) => {
  */
 const expireStalePendingRequests = async (filter = {}, io) => {
   try {
+    // 2026-08-21: $or covers BOTH modern docs (expiresAt set) and LEGACY docs with no
+    // expiresAt (created before the expiry feature) - judged by createdAt + window.
+    const now = new Date();
+    const legacyCreatedBefore = new Date(Date.now() - REQUEST_EXPIRY_MINUTES * 60 * 1000);
     const stale = await Request.find({
       ...filter,
       status: 'pending',
-      expiresAt: { $lte: new Date() }
+      $or: [
+        { expiresAt: { $lte: now } },
+        { expiresAt: { $exists: false }, createdAt: { $lte: legacyCreatedBefore } },
+        { expiresAt: null, createdAt: { $lte: legacyCreatedBefore } }
+      ]
     }).limit(25);
     for (const req of stale) {
       await expireRequestIfStale(req, io);
@@ -153,4 +171,4 @@ const expireStalePendingRequests = async (filter = {}, io) => {
   }
 };
 
-module.exports = { expireRequestIfStale, expireStalePendingRequests, REQUEST_EXPIRY_MINUTES };
+module.exports = { expireRequestIfStale, expireStalePendingRequests, REQUEST_EXPIRY_MINUTES, isStalePending };

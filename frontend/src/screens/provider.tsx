@@ -201,14 +201,16 @@ const SENT_BADGE: Record<SentOffer["status"], { label: string; cls: string }> = 
   declined: { label: "✗ Declined", cls: "bg-rose-100 text-rose-600" },
   rejected: { label: "Not selected", cls: "bg-ink-100 text-ink-500" },
   cancelled: { label: "Request cancelled", cls: "bg-ink-100 text-ink-500" },
+  withdrawn: { label: "↩ Withdrawn by you", cls: "bg-sky-100 text-sky-600" },
   expired: { label: "⏰ Request expired", cls: "bg-amber-100 text-amber-700" },
 };
 
-function MyOfferCard({ offer, onOpenJob, onDismiss }: { offer: SentOffer; onOpenJob: () => void; onDismiss: () => void }) {
+function MyOfferCard({ offer, onOpenJob, onDismiss, onWithdraw, isWithdrawing }: { offer: SentOffer; onOpenJob: () => void; onDismiss: () => void; onWithdraw?: () => void; isWithdrawing?: boolean }) {
   const meta = categoryById(offer.category);
   const badge = SENT_BADGE[offer.status];
   const isAccepted = offer.status === "accepted";
-  const isTerminal = offer.status === "declined" || offer.status === "rejected" || offer.status === "cancelled" || offer.status === "expired";
+  const isPending = offer.status === "pending";
+  const isTerminal = offer.status === "declined" || offer.status === "rejected" || offer.status === "cancelled" || offer.status === "expired" || offer.status === "withdrawn";
   return (
     <div className={cn("flex items-center gap-3 rounded-2xl bg-white p-3.5 shadow-card", isAccepted && "ring-2 ring-emerald-400")}>
       <CategoryIcon category={offer.category} size={40} soft />
@@ -236,13 +238,18 @@ function MyOfferCard({ offer, onOpenJob, onDismiss }: { offer: SentOffer; onOpen
         <button onClick={onDismiss} className="tap-highlight-none flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink-50 text-ink-400 active:scale-95" aria-label="Dismiss">
           <CloseIcon className="h-3.5 w-3.5" />
         </button>
+      ) : isPending ? (
+        // 2026-08-21: provider can pull back a still-waiting offer (offer:withdrawn flow).
+        <button onClick={onWithdraw} disabled={isWithdrawing} className="tap-highlight-none flex h-9 shrink-0 items-center justify-center gap-1 rounded-xl border-2 border-rose-100 bg-rose-50 px-2.5 text-[11px] font-bold text-rose-500 active:scale-95 disabled:opacity-50" aria-label="Withdraw offer">
+          {isWithdrawing ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rose-200 border-t-rose-500" /> : <><CloseIcon className="h-3 w-3" /> Withdraw</>}
+        </button>
       ) : null}
     </div>
   );
 }
 
 export function ProviderHome() {
-  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location, myOffers, dismissMyOffer, openActiveJob, providerBusy } = useApp();
+  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location, myOffers, dismissMyOffer, openActiveJob, providerBusy, withdrawOffer } = useApp();
   const online = user?.isOnline ?? false;
   const firstName = user?.name.split(" ")[0] ?? "there";
   const [liveCoords, setLiveCoords] = useState<Coords | null>(null);
@@ -295,17 +302,33 @@ export function ProviderHome() {
     if (user?.role === 'provider') refreshNearbyRequests();
   }, []);
 
-  // Sound + Vibration on new request for smoothness - BUG 2 FIX
-  // Only trigger when count increases (new request arrives), not on initial load
-  // (implementation deduplicated into lib/sound.ts)
-  const prevCountRef = useRef(0);
+  // Sound + Vibration on GENUINELY NEW requests only (2026-08-21 fix).
+  // Old logic compared list LENGTHS (count up => beep). With 5s polling that re-fired
+  // whenever the count jumped for ANY reason: a stale request re-surfacing, going
+  // offline->online, finishing a job (0 -> N), or one request expiring while an older
+  // one appeared. Now we track WHICH request IDs this session has already seen:
+  //  - first population after mount/online = silent prime (no alarm for what was
+  //    already waiting when you opened the screen),
+  //  - later polls/updates beep ONLY for request IDs never seen before.
+  //  Already-known requests update silently (distance/age refresh each poll).
+  const knownRequestIdsRef = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (nearbyRequests.length > prevCountRef.current && online) {
-      console.log(`[Provider] New request(s) arrived! Count ${prevCountRef.current} -> ${nearbyRequests.length}, playing sound+vibration`);
-      notifyAlert('new-request');
+    const ids = nearbyRequests.map((r: any) => String(r.id ?? r._id ?? ''));
+    if (knownRequestIdsRef.current === null) {
+      // Prime: everything visible right now is "already seen" - no sound on load.
+      knownRequestIdsRef.current = new Set(ids);
+      return;
     }
-    prevCountRef.current = nearbyRequests.length;
-  }, [nearbyRequests.length, online]);
+    const known = knownRequestIdsRef.current;
+    const fresh = ids.filter((id) => id && !known.has(id));
+    if (fresh.length > 0) {
+      console.log(`[Provider] ${fresh.length} genuinely NEW request(s) (${fresh.join(', ')}) - sound+vibration`);
+      if (online && !providerBusy) notifyAlert('new-request');
+      fresh.forEach((id) => known.add(id));
+    }
+    // Prune ids that vanished so unbounded growth of the set doesn't matter over long sessions
+    if (known.size > ids.length + 40) knownRequestIdsRef.current = new Set(ids);
+  }, [nearbyRequests, online, providerBusy]);
 
   const isLoadingNearby = isLoading['nearbyRequests'];
   const isSendingOffer = isLoading['sendOffer'];
@@ -380,7 +403,7 @@ export function ProviderHome() {
             </div>
             <div className="space-y-2.5">
               {myOffers.slice(0, 4).map((o) => (
-                <MyOfferCard key={o.id} offer={o} onOpenJob={openActiveJob} onDismiss={() => dismissMyOffer(o.id)} />
+                <MyOfferCard key={o.id} offer={o} onOpenJob={openActiveJob} onDismiss={() => dismissMyOffer(o.id)} onWithdraw={() => withdrawOffer(o.id)} isWithdrawing={!!isLoading['withdrawOffer']} />
               ))}
             </div>
           </div>
