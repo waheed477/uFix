@@ -50,6 +50,16 @@ const auth = async (req, res, next) => {
       throw err;
     }
 
+    // Dual-token enforcement (2026-08-21): ONLY access-type tokens authorize API calls.
+    // A refresh token presented here is rejected so it can never act as an API credential.
+    if (decoded.type !== 'access') {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Access token required (use /api/auth/refresh to renew a session).',
+        code: 'ACCESS_TOKEN_REQUIRED'
+      });
+    }
+
     // Find user from DB (ensure user still exists & attach full user)
     const user = await User.findById(decoded.id).select('-__v');
 

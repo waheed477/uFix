@@ -44,6 +44,11 @@ const authSocketMiddleware = async (socket, next) => {
       return next(new Error('Authentication error: Invalid token'));
     }
 
+    // Dual-token enforcement (2026-08-21): sockets authenticate with ACCESS tokens only.
+    if (decoded.type !== 'access') {
+      return next(new Error('Authentication error: Access token required'));
+    }
+
     // Ensure user still exists in DB
     const user = await User.findById(decoded.id).select('name role phone isOnline isVerified');
 

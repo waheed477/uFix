@@ -80,9 +80,66 @@ export const setStoredUser = (user: any | null) => {
   }
 };
 
+const REFRESH_KEY = 'ufix_refresh_jwt';
+
+export const getRefreshToken = (): string | null => {
+  try {
+    return localStorage.getItem(REFRESH_KEY);
+  } catch {
+    return null;
+  }
+};
+
+export const setRefreshToken = (token: string | null) => {
+  try {
+    if (token) {
+      localStorage.setItem(REFRESH_KEY, token);
+    } else {
+      localStorage.removeItem(REFRESH_KEY);
+    }
+  } catch (e) {
+    console.warn('Failed to set refresh token in localStorage', e);
+  }
+};
+
+/** Store the full dual-token session returned by verify-otp / google sign-in. */
+export const setAuthSession = (authResponse: { token?: string; refreshToken?: string } | null | undefined) => {
+  if (!authResponse) return;
+  if (authResponse.token) setToken(authResponse.token);
+  if (authResponse.refreshToken) setRefreshToken(authResponse.refreshToken);
+};
+
 export const clearAuth = () => {
   setToken(null);
+  setRefreshToken(null);
   setStoredUser(null);
+  try { localStorage.removeItem('ufix_setup_resume_step'); } catch {}
+};
+
+// Single-flight session refresh (2026-08-21): any 401 tries ONE shared refresh; every
+// in-flight request awaiting it retries once when it succeeds. Never two refreshes at once.
+let refreshPromise: Promise<boolean> | null = null;
+const refreshSessionOnce = (): Promise<boolean> => {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const rt = getRefreshToken();
+      if (!rt) return false;
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: rt }),
+        });
+        if (!res.ok) return false;
+        const data = await res.json().catch(() => null);
+        if (data?.token) { setToken(data.token); return true; }
+        return false;
+      } catch {
+        return false;
+      }
+    })().finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
 };
 
 // Central fetch wrapper
@@ -108,33 +165,40 @@ async function apiFetch(path: string, options: FetchOptions = {}) {
     }
   }
 
-  const headers: Record<string, string> = {
-    ...(options.headers as any),
+  const doFetch = async () => {
+    const headers: Record<string, string> = {
+      ...(options.headers as any),
+    };
+
+    // Default Content-Type JSON, but allow override for FormData (multipart)
+    const isFormData = options.body instanceof FormData;
+    if (!isFormData && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    // Re-read on every attempt: after a successful refresh the retry must send the NEW token
+    const currentToken = getToken();
+    if (currentToken) {
+      headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+
+    return fetch(url, { ...options, headers });
   };
 
-  // Default Content-Type JSON, but allow override for FormData (multipart)
-  const isFormData = options.body instanceof FormData;
-  if (!isFormData && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
-  }
+  let response = await doFetch();
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
-
-  // Handle 401 - trigger logout
-  if (response.status === 401) {
-    // Don't auto-logout for auth endpoints themselves (send-otp, verify-otp, google)
-    // Only for protected routes
-    if (!path.includes('/auth/')) {
+  // 401 handling (2026-08-21): an expired ACCESS token silently renews via the refresh
+  // token (single-flight) and retries ONCE. Only when refresh also fails do we tear the
+  // session down, and the store router shows "Session expired, please log in again."
+  // Auth endpoints never trigger this (their 401s are credential errors, not expiry).
+  if (response.status === 401 && !path.includes('/auth/')) {
+    const refreshed = await refreshSessionOnce();
+    if (refreshed) {
+      response = await doFetch();
+    }
+    if (response.status === 401) {
       clearAuth();
-      // Dispatch event for store to handle logout
-      window.dispatchEvent(new CustomEvent('ufix:unauthorized'));
+      window.dispatchEvent(new CustomEvent('ufix:unauthorized', { detail: { reason: 'session-expired' } }));
     }
   }
 
@@ -195,6 +259,16 @@ export const api = {
         body: JSON.stringify({ phone, otp, name, role, city }),
       }),
     me: () => apiFetch('/api/auth/me'),
+    refresh: (refreshToken: string) =>
+      apiFetch('/api/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      }),
+    logout: (refreshToken: string) =>
+      apiFetch('/api/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      }),
   },
 
   // Users

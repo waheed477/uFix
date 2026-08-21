@@ -28,7 +28,7 @@ import {
   WrenchIcon,
   HomeIcon,
 } from "@/components/ui";
-import { api, setToken, setStoredUser, getToken } from "@/lib/api";
+import { api, setToken, setAuthSession, setStoredUser, getToken } from "@/lib/api";
 import { PAKISTAN_CITIES, getCityCoords, searchPakistanCities, type PakistanCity } from "@/lib/location";
 
 /* ============================================================
@@ -175,7 +175,7 @@ export function AuthScreen() {
       
       // If success, store token and user
       if (response.token && response.user) {
-        setToken(response.token);
+        setAuthSession(response); // access + refresh (dual-token session, 2026-08-21)
         setStoredUser(response.user);
         setDraftCategory((response.user.category as any) || 'plumber');
         // Regression Fix (BUG B - 2026-08-20): completeAuth hydrates the store's `user`
@@ -202,6 +202,12 @@ export function AuthScreen() {
             setName(err.data.googleData.name);
           }
         }
+      } else if (err.data?.needsRole) {
+        // 2026-08-21: genuinely-new Google account - Google replaced identity verification,
+        // not profile setup. Collect role/city (name pre-filled from Google) then resubmit.
+        if (!name && err.data?.googleData?.name) setName(err.data.googleData.name);
+        setStep('details');
+        setError('Almost there - pick your role to finish creating your account.');
       } else if (err.data?.needsConfig) {
         setError('Google Sign-In not configured on server. Please provide GOOGLE_CLIENT_ID in backend .env. Using phone OTP instead.');
       } else {
@@ -258,7 +264,7 @@ export function AuthScreen() {
 
         // Success - existing user login
         if (response.token && response.user) {
-          setToken(response.token);
+          setAuthSession(response); // access + refresh (dual-token session, 2026-08-21)
           setStoredUser(response.user);
           // Regression Fix (BUG B - 2026-08-20): hydrate the store's `user` NOW via
           // completeAuth (it also routes to providerSetup/location). Previously `user`
@@ -298,7 +304,7 @@ export function AuthScreen() {
       const response = await api.auth.verifyOtp(phone, otp, name.trim(), role, city.trim() || undefined);
 
       if (response.token && response.user) {
-        setToken(response.token);
+        setAuthSession(response); // access + refresh (dual-token session, 2026-08-21)
         setStoredUser(response.user);
         setDraftCategory((response.user.category as any) || 'plumber');
 
@@ -546,7 +552,15 @@ export function AuthScreen() {
 
 export function ProviderSetupScreen() {
   const { setStage, setDraftCategory } = useApp();
-  const [step, setStep] = useState(0);
+  // 2026-08-21: a returning user with a PARTIAL signup resumes exactly where they left
+  // off (completeAuth / session-restore set this from the backend's setupStep flag).
+  const [step, setStep] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('ufix_setup_resume_step') || '0');
+      localStorage.removeItem('ufix_setup_resume_step'); // one-shot handoff
+      return v === 2 ? 2 : 0;
+    } catch { return 0; }
+  });
   const [category, setCategory] = useState<Category | null>(null);
   const [radius, setRadius] = useState(8);
   const [experience, setExperience] = useState("4–7");

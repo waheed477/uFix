@@ -81,7 +81,9 @@ function connectSocket(): Socket | null {
   }
 
   const newSocket = io(SOCKET_URL, {
-    auth: { token },
+    // Function form (socket.io v4.4+): every connect AND every auto-reconnect reads the
+    // CURRENT access token, so a refreshed session never reconnects with a stale one.
+    auth: (cb: (data: { token: string | null }) => void) => cb({ token: getToken() }),
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 1000,

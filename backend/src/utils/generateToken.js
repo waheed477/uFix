@@ -1,49 +1,51 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 /**
- * Generate JWT with user id + role payload
- * @param {Object} user - Mongoose user document or object with _id and role
- * @returns {String} JWT token
- * 
- * Payload includes:
- * - id: user _id
- * - role: customer | provider
- * 
- * Expiry: 30 days (reasonable for mobile app, matches spec)
- * Secret from env JWT_SECRET - must be set
+ * Token utilities - dual-token auth (2026-08-21 Returning-User/Session pass).
+ *
+ * ACCESS token: short-lived (25 min) - authorizes every API call + socket handshake.
+ * REFRESH token: long-lived (30 days) - ONLY usable at POST /api/auth/refresh; carries a
+ *   `jti` so the server can look up + revoke the stored (bcrypt-hashed) token record.
+ * Both are signed with JWT_SECRET and carry `type: 'access' | 'refresh'` so middleware
+ * can hard-reject the wrong kind (a refresh token must NEVER authorize API/socket access).
  */
-const generateToken = (user) => {
-  const payload = {
-    id: user._id || user.id,
-    role: user.role
-  };
 
+const ACCESS_TTL = '25m';
+const REFRESH_TTL_DAYS = 30;
+const REFRESH_TTL = `${REFRESH_TTL_DAYS}d`;
+const REFRESH_TTL_MS = REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+const getSecret = () => {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     console.warn('⚠️ JWT_SECRET not set in .env - using insecure default (change for production!)');
   }
-
-  // Use fallback only in dev to allow testing without env
-  const jwtSecret = secret || 'ufix_dev_secret_change_in_prod_2024';
-
-  const token = jwt.sign(payload, jwtSecret, {
-    expiresIn: '30d' // 30 days as per spec
-  });
-
-  return token;
+  return secret || 'ufix_dev_secret_change_in_prod_2024';
 };
+
+const basePayload = (user) => ({ id: user._id || user.id, role: user.role });
+
+/** Short-lived API/socket token. */
+const generateAccessToken = (user) =>
+  jwt.sign({ ...basePayload(user), type: 'access' }, getSecret(), { expiresIn: ACCESS_TTL });
+
+/** Long-lived renewal token. jti = the server-side session record id (revocation handle). */
+const generateRefreshToken = (user, jti) =>
+  jwt.sign({ ...basePayload(user), type: 'refresh', jti: jti || crypto.randomBytes(16).toString('hex') }, getSecret(), { expiresIn: REFRESH_TTL });
 
 /**
- * Verify JWT token (utility wrapper)
- * @param {String} token 
- * @returns {Object} decoded payload
+ * Backwards-compat alias kept = ACCESS token now (30d un-typed tokens are gone; the auth
+ * middlewares only accept type:'access', so every live flow gets short-lived tokens).
  */
-const verifyToken = (token) => {
-  const jwtSecret = process.env.JWT_SECRET || 'ufix_dev_secret_change_in_prod_2024';
-  return jwt.verify(token, jwtSecret);
-};
+const generateToken = (user) => generateAccessToken(user);
+
+const verifyToken = (token) => jwt.verify(token, getSecret());
 
 module.exports = {
   generateToken,
-  verifyToken
+  generateAccessToken,
+  generateRefreshToken,
+  verifyToken,
+  REFRESH_TTL_MS,
 };

@@ -21,6 +21,11 @@ router.post('/phone/send-otp', authController.sendOtp);
 // Phone OTP - verify
 router.post('/phone/verify-otp', authController.verifyOtp);
 
+// Session management (2026-08-21): refresh is PUBLIC (its own token IS the credential);
+// logout revokes the presented refresh session server-side (idempotent)
+router.post('/refresh', authController.refreshSession);
+router.post('/logout', authController.logout);
+
 // Get current user - protected
 router.get('/me', auth, authController.getMe);
 

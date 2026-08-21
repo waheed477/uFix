@@ -25,7 +25,7 @@ Phase 10 Completed — Site 100% functional end-to-end with city-based filtering
 
 ## API Endpoints (Live) - Final
 - Health: GET /, GET /api/health
-- Auth: POST /api/auth/google, POST /api/auth/phone/send-otp, POST /api/auth/phone/verify-otp, GET /api/auth/me
+- Auth: POST /api/auth/google, POST /api/auth/phone/send-otp, POST /api/auth/phone/verify-otp, POST /api/auth/refresh (2026-08-21: {refreshToken} -> new access token + fresh user; 401 REFRESH_INVALID/REFRESH_REVOKED), POST /api/auth/logout (idempotent, server-side refresh revocation), GET /api/auth/me
 - Users: GET /api/users/profile, PATCH /api/users/profile (name, city, profilePicture, isOnline), POST /api/users/profile/picture, PATCH /api/users/location {lng,lat}
 - Providers: PATCH /api/providers/setup {category, radiusKm, yearsExperience, defaultVisitingCharge}, POST /api/providers/document, GET /api/providers/verification-status, GET /api/providers/available?city=&category= (city-based online count + list with price), PATCH /api/providers/:id/verify, POST /api/providers/dev/verify-me (dev auto-verify)
 - Requests: POST /api/requests {category, description, lng, lat, address, city}, GET /api/requests/nearby (city+category), GET /api/requests/my, GET /api/requests/:id, PATCH /api/requests/:id/cancel, POST /api/requests/:id/direct-accept {providerId} (direct booking with price from profile)
@@ -44,6 +44,7 @@ Phase 10 Completed — Site 100% functional end-to-end with city-based filtering
 - Message: job ref indexed, sender ref, text 1-2000, readAt, job+createdAt index
 - Review: job ref, fromUser ref, toUser ref, rating 1-5 integer, comment max 500, unique compound job+fromUser
 - Notification: user indexed, type enum [new_offer, offer_accepted, offer_rejected, offer_declined, offer_withdrawn, request_new (legacy - no longer created since 2026-08-21), request_cancelled, request_expired, job_status_update, new_message, new_rating], title, body, relatedId, isRead
+- RefreshToken (2026-08-21): user ref indexed, jti unique (refresh-token JWT id), tokenHash (bcryptjs), device label <=120, expiresAt TTL index (30d, autopurge), revokedAt; one doc PER LOGIN = multi-device sessions independent
 
 ## Environment Variables
 Backend: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET (64 hex), GOOGLE_CLIENT_ID (optional), OTP_EXPIRY_MINUTES=5, CLOUDINARY_CLOUD_NAME/KEY/SECRET (optional mock), ADMIN_SECRET (optional dev open + auto-verify)
@@ -427,6 +428,52 @@ persisted request_new, layout guards) + self-test **68/68** + bidirectional 48/4
 availability-expiry 39/39 + audit 12/12 + p3 6/6 + guards 8/8 + pre-deploy 5/5 + lifecycle 31/31 +
 offer-withdraw 23/23 = **259/259 green**; `npm run build` OK (505.94 kB).
 
+## Returning User Login & Session Persistence (Phone + Google) — 2026-08-21
+
+Auth-flow correctness rework. **The backend is the single source of truth for all auth flags** — the frontend never guesses whether a user is new or fully set up; it routes purely on server-returned flags.
+
+### 1. The auth-response contract (identical shape from every auth endpoint)
+`POST /auth/phone/send-otp` → OTP only (Kept; re-send never rate-limited). Every identity-issuing endpoint — `POST /api/auth/phone/verify-otp`, `POST /api/auth/google`, `POST /api/auth/refresh`, `GET /api/auth/me` — returns:
+```
+{ status, message, isNewUser,
+  token        (access JWT, 25 min, claim type:'access'),
+  refreshToken (30-day JWT, claim type:'refresh' + jti),
+  user: { id, name, email, phone, role, city, profilePicture, location, rating, reviews,
+          category, radiusKm, yearsExperience, defaultVisitingCharge, documentUrl,
+          verificationStatus, authProvider, isNewUser, setupComplete, setupStep } }
+```
+- `verify-otp` is now **existence-check-before-create**: existing phone → LOGIN; name/role/city resubmitted in the body are IGNORED (DB wins), `isNewUser:false` + full profile + both tokens. New phone → signup REQUIRES name+role (city optional), `isNewUser:true`. OTP is always consumed on success (prevents reuse).
+- `GET /auth/me` echoes the same user payload with `isNewUser:false` (it can only be a session restore for an existing user) + `googleLinked` boolean (raw googleId never exposed).
+
+### 2. googleId-vs-phone reconciliation order (NEVER a duplicate account)
+`googleAuth` resolves identity in a fixed order:
+1. **Lookup by googleId FIRST** — existing Google user → login; stale name/picture in the body ignored, `isNewUser:false`.
+2. **Lookup by phone SECOND** — account originally created by phone OTP using the same number → **LINK**: `googleId` is persisted onto the SAME user row, `authProvider` becomes `'both'`, `isNewUser:false`, one user row total. A phone token and a Google token are two doors to the same house; verified live in-process (G3).
+3. **Lookup by email THIRD** → link googleId onto that account.
+4. Genuinely new → signup requires phone (OTP-proof replacement: Google identity ≠ phone ownership) + role/city for setup, `isNewUser:true`.
+Conflict guard: if the phone row is already linked to a DIFFERENT googleId → **409** (no silent hijack, no duplicate — G7).
+
+### 3. setupComplete / setupStep (computed on read, not a stored flag)
+`utils/setupComplete.js` — customer: `name && city`. Provider: also needs `category && radiusKm` and `verificationStatus !== 'not_submitted'`. `firstIncompleteStep` → `'details' | 'category' | 'verification' | null`. Both ride on EVERY auth user payload. Because it's derived from persisted fields, provider location/category/verification **re-verify across logins** by construction — nothing is rebuilt (P1–P5 live matrix: partial provider survives relogin at exactly `'category'`, then advances to exactly `'verification'` after setup PATCH, then a real document upload → pending → `setupComplete:true`; full persistence re-confirmed across a second login).
+
+### 4. Dual-token sessions (Part C)
+- **Access JWT 25 min + refresh JWT 30 days**, both signed with JWT_SECRET, distinguished by `type:'access'|'type:'refresh'` claims. HTTP auth middleware AND the Socket.io handshake middleware **reject any non-access token** (a refresh token cannot open a socket or call /me — live-checked T1).
+- `RefreshToken` model: `{ user, jti (unique), tokenHash (bcryptjs — DB leak never leaks usable tokens), device, expiresAt (TTL index, autopurge), revokedAt }`. One document is created **per login**, so multiple devices/sessions coexist independently (T5: revoking device A leaves device B fully alive — no forced single-session).
+- `POST /auth/refresh`: verifies signature+type+jti, requires an unexpired DB record, bcrypt-compares tokenHash, issues a NEW access token + fresh user payload. `POST /auth/logout`: deletes the refresh record (idempotent, tolerates already-expired tokens via decode fallback) → subsequent refresh of that token → **401 REFRESH_REVOKED** (live T4/T6).
+
+### 5. Frontend session handling
+- Both tokens in `localStorage` (`ufix_jwt`, `ufix_refresh_jwt`). **Deliberate trade-off vs httpOnly cookies:** production deploy is cross-domain (Render backend + Vercel frontend), so first-party SameSite=Lax cookies don't fit without a shared parent domain; Authorization-header localStorage tokens keep the current architecture deploy-simple. XSS surface is the accepted cost, mitigated by short access lifetime + server-side revocation. **Future upgrade path:** swap to httpOnly SameSite=None;Secure refresh cookie once domains are finalized — backend endpoint contract already supports it (refresh read from cookie or body).
+- `apiFetch` on **any non-/auth/ 401** → **single-flight** silent refresh (one module-level shared promise — N simultaneous 401s trigger ONE refresh) → retry the ORIGINAL request once. Only if refresh itself fails: `clearAuth()` + dispatch `ufix:unauthorized` `{reason:'session-expired'}` → toast “Session expired, please log in again.” → route to auth. (T3 mints an actually-expired access token with the dev secret to prove the 401 trigger.)
+- App mount → `GET /auth/me` restore: stored user is REPLACED by the backend payload, and routing uses `setupComplete`: returning+complete → Home (or Location screen if no real location yet) — **never re-shows setup**. Returning+!complete provider → resumes the wizard at the first incomplete step via one-shot handoff key `ufix_setup_resume_step` (written by BOTH completeAuth and the mount-restore path; `'category'→step 0`, `'verification'→step 2`), so a cold reload mid-setup lands exactly where the user left off.
+- Socket.io auth uses **function form** `auth:(cb)=>cb({token:getToken()})` so every reconnect presents the CURRENT access token (after a refresh, the next reconnect is authenticated with the new one — no staleness window).
+- Google button on the frontend routes identically: backend `isNewUser` → name(prefilled)/details step + location permission + provider wizard; else straight in.
+
+### 6. Known limits (documented, not hidden)
+- **Google endpoint is env-limited in the sandbox:** no GOOGLE_CLIENT_ID + real Google idTokens cannot be minted here, so HTTP-level live verification isn't possible. The endpoint **fails LOUDLY** with 500 `{needsConfig:true}` when unconfigured (asserted by G1). All reconciliation logic (link first-phone-then-google, returning-by-googleId, new signup, 409 conflict) IS live-tested **in-process against the real controller + real in-memory Mongo**, mocking only Google's cryptographic verify seam (G3–G7). Same treatment as prior passes.
+- OTP remains in-memory (Map), 4-digit demo code logged to console in dev — unchanged.
+
+**Verification (fresh dev-inmemory server, final code, all real API calls):** new suite `backend/tests/auth-flow.js` **29/29 green** (8 static contract guards + 4 live OTP + 5 live provider-resume matrix + 6 live dual-token/revoke/multi-device + 5 in-process Google reconciliation + 1 env-limited skip); full battery incl. all prior suites = **288/288 green** (`tests/run.sh` — guards untouched, BUG A/B intact); `npm run build` OK (507.58 kB).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -438,6 +485,7 @@ offer-withdraw 23/23 = **259/259 green**; `npm run build` OK (505.94 kB).
 - [x] Post-live-testing fixes: offer-withdraw endpoint + ID-based provider notify + legacy stale-request expiry + 2-min demo expiry - 172/172 green (2026-08-21)
 - [x] End-to-End Self-Test (20-step final gate): 64/64 live checks + full regression 236/236 - DEPLOYMENT GATE PASSED (2026-08-21)
 - [x] Provider Home real-estate (option a) + notification semantics fix + 'X providers viewing' live count (request:viewCount) - 259/259 green (2026-08-21)
+- [x] Returning User Login & Session Persistence: isNewUser/setupComplete contract (backend = single source of truth), googleId>phone linking no duplicates, dual-token refresh + server-side revocation, silent single-flight frontend refresh, partial-setup resume - 288/288 green (2026-08-21)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

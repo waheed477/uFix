@@ -71,7 +71,7 @@ import {
   findNearestCity,
   PAKISTAN_CITIES,
 } from "./location";
-import { api, getToken, setToken, setStoredUser, getStoredUser, clearAuth } from "./api";
+import { api, getToken, setToken, setStoredUser, getStoredUser, clearAuth, setAuthSession, getRefreshToken } from "./api";
 import { socketClient } from "./socket";
 import { notifyAlert } from "./sound";
 import {
@@ -321,9 +321,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         (async () => {
           try {
             setLoading('auth', true);
-            // Validate token by fetching profile
-            const profileData = await api.users.getProfile();
-            const backendUser = profileData.user;
+            // Session restore = GET /auth/me (2026-08-21): validates the access token
+            // (apiFetch silently refreshes it via the refresh token if expired) and returns
+            // the backend-computed setupComplete flag we route on. isNewUser:false always.
+            const meData = await api.auth.me();
+            const backendUser = meData.user;
+            setStoredUser(backendUser); // refresh the cached profile incl. setup flags
             const frontendUser = adaptBackendUserToFrontendUser(backendUser);
             
             if (isMountedRef.current) {
@@ -374,9 +377,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 }
               }
 
-              // Stage decision: provider setup first; a user WITH a real saved location skips
-              // the permission screen entirely (P2); only genuinely location-less users see it.
-              if (frontendUser.role === 'provider' && !backendUser.category) {
+              // Stage decision STRICTLY from the backend's setupComplete (2026-08-21):
+              // complete => app (location saved) or location permission (none saved);
+              // incomplete provider => provider wizard at the exact resume step.
+              if (backendUser.setupComplete === false && frontendUser.role === 'provider') {
+                try { localStorage.setItem('ufix_setup_resume_step', backendUser.setupStep === 'verification' ? '2' : '0'); } catch {}
                 setStage('providerSetup');
               } else if (hasRealLocation) {
                 setStage('app');
@@ -404,8 +409,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 2000);
 
     // Listen for 401 unauthorized event from api.ts
-    const handleUnauthorized = () => {
+    const handleUnauthorized = (e: any) => {
       console.log('Received unauthorized event, logging out');
+      // Only reachable when the silent refresh also failed (api.ts) - tell the user why.
+      showToast('Session expired, please log in again.', 'info');
       handleLogout();
     };
 
@@ -1047,6 +1054,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // --- Auth ---
   const handleLogout = useCallback(() => {
+    // Real revocation (2026-08-21): delete this device's refresh session server-side.
+    // Fire-and-forget - local teardown must not depend on network success.
+    try { const rt = getRefreshToken(); if (rt) api.auth.logout(rt).catch(() => {}); } catch {}
     clearAuth();
     socketClient.disconnect();
     setUser(null);
@@ -1096,13 +1106,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setUser(newUser);
     }
 
-    if (role === 'provider') {
-      const backendUser = getStoredUser();
-      if (backendUser && !backendUser.category) {
-        setStage('providerSetup');
-      } else {
-        setStage('location');
-      }
+    // 2026-08-21: route STRICTLY on the backend's setupComplete/setupStep flags (stored
+    // with the user above) - identical behavior for phone OTP and Google sign-in. Gone is
+    // the old infer-from-missing-category heuristic that wrongly re-onboarded RETURNING
+    // providers (auth responses used to omit category, so it always looked "incomplete").
+    const su = getStoredUser();
+    if (su && su.setupComplete === false && role === 'provider') {
+      // Partial provider signup (either method): resume at the first incomplete wizard step
+      try { localStorage.setItem('ufix_setup_resume_step', su.setupStep === 'verification' ? '2' : '0'); } catch {}
+      setStage('providerSetup');
     } else {
       setStage('location');
     }
