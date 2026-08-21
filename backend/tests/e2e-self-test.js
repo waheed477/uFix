@@ -74,7 +74,7 @@ async function setupProvider(u, loc) {
   const me = await api('/api/users/profile', { token: u.token });
   return { setupOk: s.status === 200, docOk: d.status === 200, verifyOk: v.status === 200, onlineOk: on.status === 200, me: me.data?.user || me.data };
 }
-const ALL_EVENTS = ['request:new', 'request:closed', 'request:cancelled', 'request:expired', 'offer:new', 'offer:accepted', 'offer:rejected', 'offer:declined', 'offer:withdrawn', 'job:statusUpdate', 'notification:new', 'chat:message', 'chat:read', 'chat:error'];
+const ALL_EVENTS = ['request:new', 'request:viewCount', 'request:closed', 'request:cancelled', 'request:expired', 'offer:new', 'offer:accepted', 'offer:rejected', 'offer:declined', 'offer:withdrawn', 'job:statusUpdate', 'notification:new', 'chat:message', 'chat:read', 'chat:error'];
 function session(token) {
   const events = [];
   const s = io(API, { auth: { token }, transports: ['websocket'], reconnection: false, timeout: 8000 });
@@ -112,6 +112,11 @@ const SRC = (f) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
   ok('S1/S2 4 real socket sessions connected');
 
   console.log('\n=== Steps 3-4: request -> LIVE request:new, NO duplicate notify on re-polls ===');
+  // Shared-DB safe: derive the expected viewing count live (other suites may have left
+  // eligible plumbers online on the same dev-inmemory DB). The available endpoint applies
+  // the same online+verified+non-busy eligibility, so it predicts the fan-out/view count.
+  const availNow = await api(`/api/providers/available?city=Faisalabad&category=plumber`, { token: C1.token });
+  const EXPECT_VIEW = availNow.data?.count ?? 2;
   const r1 = await api('/api/requests', { method: 'POST', token: C1.token, body: { category: 'plumber', description: 'Self-test kitchen pipe leak', ...FSD, address: 'Gulberg, Faisalabad' } });
   const R1 = S(r1.data?.request?.id);
   check('S3 request created 201 (plumber/Faisalabad)', r1.status === 201 && !!R1, r1.status);
@@ -123,9 +128,28 @@ const SRC = (f) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
   await sleep(400);
   const p1Bell1 = await api('/api/notifications', { token: P1.token });
   const requestNewForR1 = (p1Bell1.data?.notifications || []).filter((n) => n.type === 'request_new' && S(n.relatedId) === R1);
-  check('S4 no duplicate: socket request:new still 1 after 3 polls + persisted request_new entries for R1 == 1',
-    scP1.count('request:new', (d) => reqIdOf(d) === R1) === 1 && requestNewForR1.length === 1,
+  check('S4 no duplicate socket alert (still 1 after 3 polls); ZERO persisted request_new entries (2026-08-21 semantics: seeing != notification)',
+    scP1.count('request:new', (d) => reqIdOf(d) === R1) === 1 && requestNewForR1.length === 0,
     { socket: scP1.count('request:new', (d) => reqIdOf(d) === R1), persisted: requestNewForR1.length });
+  // Issue 2: customer-side live "X providers viewing" — seeded in 201 response + emitted live
+  check(`S4b create response carries viewingProviders {count:${EXPECT_VIEW} (= live eligible count), category:plumber}`,
+    r1.data?.request?.viewingProviders?.count === EXPECT_VIEW && r1.data?.request?.viewingProviders?.category === 'plumber',
+    r1.data?.request?.viewingProviders);
+  check('S4c customer got request:viewCount LIVE for R1 with the same count',
+    scC1.count('request:viewCount', (d) => S(d?.requestId) === R1 && d?.count === EXPECT_VIEW && d?.category === 'plumber') === 1,
+    scC1.events.filter((e) => e.ev === 'request:viewCount').map((e) => e.d));
+  // live update on provider offline/online while R1 still pending
+  const vcBefore = scC1.count('request:viewCount', (d) => S(d?.requestId) === R1);
+  await api('/api/users/profile', { method: 'PATCH', token: P2.token, body: { isOnline: false } });
+  await sleep(900);
+  check(`S4d P2 offline -> customer re-pinged request:viewCount count ${EXPECT_VIEW}-1`,
+    scC1.count('request:viewCount', (d) => S(d?.requestId) === R1 && d?.count === EXPECT_VIEW - 1) === 1,
+    scC1.events.filter((e) => e.ev === 'request:viewCount' && S(e.d?.requestId) === R1).map((e) => e.d?.count));
+  await api('/api/users/profile', { method: 'PATCH', token: P2.token, body: { isOnline: true } });
+  await sleep(900);
+  check(`S4e P2 back online -> request:viewCount back to ${EXPECT_VIEW} (2nd full-count ping)`,
+    scC1.count('request:viewCount', (d) => S(d?.requestId) === R1 && d?.count === EXPECT_VIEW) === 2,
+    scC1.events.filter((e) => e.ev === 'request:viewCount' && S(e.d?.requestId) === R1).map((e) => e.d?.count));
   const frontSrc = SRC(path.join('screens', 'provider.tsx'));
   check('S4 frontend re-notify guard is ID-based (knownRequestIdsRef), count-compare gone',
     frontSrc.includes('knownRequestIdsRef') && !/nearbyRequests\.length > prevCountRef/.test(frontSrc));
@@ -313,8 +337,8 @@ const SRC = (f) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
   const p1Types = new Set(p1BellF.map((n) => n.type));
   check('S18a customer bell trail: new_offer + job_status_update + new_rating + new_message present',
     ['new_offer', 'job_status_update', 'new_rating', 'new_message'].every((t) => c1Types.has(t)), [...c1Types]);
-  check('S18b provider bell trail: request_new + offer_declined + offer_accepted + request_cancelled + job_status_update + new_rating',
-    ['request_new', 'offer_declined', 'offer_accepted', 'request_cancelled', 'job_status_update', 'new_rating'].every((t) => p1Types.has(t)), [...p1Types]);
+  check('S18b provider bell trail: offer_declined + offer_accepted + request_cancelled + job_status_update + new_rating (NO request_new by design)',
+    ['offer_declined', 'offer_accepted', 'request_cancelled', 'job_status_update', 'new_rating'].every((t) => p1Types.has(t)) && !p1Types.has('request_new'), [...p1Types]);
   const c2Types18 = new Set((await api('/api/notifications', { token: C2.token })).data?.notifications?.map((n) => n.type) || []);
   check('S18c 2nd customer bell: new_offer + offer_withdrawn present', c2Types18.has('new_offer') && c2Types18.has('offer_withdrawn'), [...c2Types18]);
   const bellP1 = await api('/api/notifications', { token: P1.token });

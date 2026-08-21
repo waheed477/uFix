@@ -7,7 +7,7 @@ Phase 10 Completed — Site 100% functional end-to-end with city-based filtering
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, Socket.io-client, Fetch API, 35 Pakistan Cities DB, Custom SVG Map (100% free, no API key) + Optional Google Maps
 - **Backend:** Node.js, Express, MongoDB (Mongoose) 2dsphere indexes, Socket.io, Cloudinary + Multer, JWT, Google Auth + Phone OTP (inDrive style)
 - **Maps:** Custom SVG perfect map (parcels, parks, water, roads, city watermark, free badge) + OSM Nominatim free reverse geocode + Optional Google Maps JS/Embed via VITE_GOOGLE_MAPS_API_KEY
-- **Real-Time:** Socket.io room-based user:{id}, in-memory adapter, events: request:new, offer:new, offer:accepted/rejected, request:closed/cancelled, job:statusUpdate, job:locationUpdate (live both ways), chat:message/read, notification:new
+- **Real-Time:** Socket.io room-based user:{id}, in-memory adapter, events: request:new, request:viewCount (customer 'X viewing' live count), offer:new, offer:accepted/rejected, request:closed/cancelled, job:statusUpdate, job:locationUpdate (live both ways), chat:message/read, notification:new
 - **Currency:** PKR (Pakistan Rupee) - Changed from ₹ to PKR as per requirement
 
 ## Completed Phases
@@ -43,7 +43,7 @@ Phase 10 Completed — Site 100% functional end-to-end with city-based filtering
 - Job: request unique ref, customer ref, provider ref, offer ref, status on_the_way/arrived/in_progress/completed, statusHistory, completedAt
 - Message: job ref indexed, sender ref, text 1-2000, readAt, job+createdAt index
 - Review: job ref, fromUser ref, toUser ref, rating 1-5 integer, comment max 500, unique compound job+fromUser
-- Notification: user indexed, type enum [new_offer, offer_accepted, offer_rejected, offer_declined, request_new, request_cancelled, job_status_update, new_message, new_rating], title, body, relatedId, isRead
+- Notification: user indexed, type enum [new_offer, offer_accepted, offer_rejected, offer_declined, offer_withdrawn, request_new (legacy - no longer created since 2026-08-21), request_cancelled, request_expired, job_status_update, new_message, new_rating], title, body, relatedId, isRead
 
 ## Environment Variables
 Backend: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET (64 hex), GOOGLE_CLIENT_ID (optional), OTP_EXPIRY_MINUTES=5, CLOUDINARY_CLOUD_NAME/KEY/SECRET (optional mock), ADMIN_SECRET (optional dev open + auto-verify)
@@ -392,6 +392,41 @@ p3-city-sync 6/6 · guards 8/8 · pre-deploy 5/5 · final-lifecycle 31/31 ·
 offer-withdraw 23/23 = **236/236 green**. `npm run build` OK (504.23 kB).
 Remaining known limitations: unchanged, see "Known Limitations" section above.
 
+## Provider Home Real-Estate + Notification Semantics ("X Viewing") — 2026-08-21
+
+Two issues from live testing feedback. New suite `backend/tests/notification-view-count.js` (19 checks); self-test + final-lifecycle updated for the new semantics.
+
+### Issue 1 — Incoming requests now own the Provider Home screen (CHOICE: option a)
+Chose **(a) — primary content of Provider Home** over moving to the Jobs tab. Rationale: JobsTab
+is shared role UI (customer jobs/history live there too), so carving a provider-only "Incoming
+Requests" section into it would special-case the shared screen and scatter the provider's primary
+action surface across tabs; ProviderHome already held the list, just starved of space. No tab
+refactor, smallest diff, zero navigation change for providers.
+What changed (layout only — **all logic preserved**: live socket adds, ID-based no-repeat-alert
+tracking (`knownRequestIdsRef`), busy-lock hiding/focus-mode, expiry filtering, 5s polling):
+- Fixed top is now COMPACT: header row, slim online-toggle card (`p-5`→`p-4`, smaller blob), compact stats (`p-3`→`p-2.5`, value `text-lg`→`text-base`).
+- The scroll region now leads with the "Requests in {city} · Live distance" header + the full-width RequestCard list — cards get the majority of the screen.
+- "Your offers · live" moved BELOW the requests list (same scroll flow, `mt-4`), unchanged cards/badges/withdraw wiring.
+- Static layout guards L1-L4 in the new suite will fail loudly if the requests block leaves the scroll region or the no-repeat tracking regresses.
+
+### Issue 2 — Notification semantics corrected + customer-side "X providers viewing"
+- **REMOVED:** persisted `request_new` bell notifications for every nearby provider on every new request — merely SEEING a request in the list is not a notification. The live `request:new` SOCKET event and the client sound/vibration cue are UNCHANGED (genuinely-new-request alert only, ID-tracked). Provider bell entries remain reserved for actions tied to them personally: offer accepted/declined/rejected, request cancelled/expired after they offered. (Enum values `request_new`/`request_expired` etc. stay in the model so legacy entries still render; the bell icon/navigation mappings untouched.)
+- **NEW socket event** `request:viewCount` → `{ requestId, count, category }` emitted to the CUSTOMER (a) once at request creation and (b) on every provider online/offline toggle that could change a pending request's count (`utils/viewCount.js` → `reemitViewCountsForProvider`, called fire-and-forget from `PATCH /users/profile` when `isOnline` is provided). Count semantics: exactly the provider set that can SEE the request — online+verified+category+city+radius, busy-lock excluded — via the extracted shared matcher `computeMatchingProviders`, now used by createRequest itself so fan-out and view-count can never disagree.
+- **API:** `POST /api/requests` 201 response now includes `request.viewingProviders: { count, category }` (immediate paint before/with the socket echo; additive).
+- **Frontend:** `store.viewCounts` map, seeded from the create response, updated live by `request:viewCount`, cleaned up on accept/cancel/expiry; `ViewingPill` in customer.tsx renders on BOTH the post-request landing screen (AvailableProviders) and the Offers screen while the request is open: "N {category plural} viewing your request · Live" (0-count → "Finding {plural}…") using the CATEGORIES plural vocabulary.
+
+**Regression updates for the new semantics (assertions corrected, not deleted):** e2e-self-test
+S4 now asserts ZERO persisted request_new + 1 socket event, and S4b-S4e verify the live count
+(create response + socket + offline/online re-pings); final-lifecycle provider trail no longer
+requires request_new (now asserts its ABSENCE). Counts in both suites are derived live from
+`/providers/available` (shared-inmemory-DB safe — suites can run in any order on one server).
+
+**Verification (all live, one clean dev-inmemory session, final code):** view-count suite **19/19**
+(response+socket counts, live offline/online updates, busy-exclusion parity with fan-out, zero
+persisted request_new, layout guards) + self-test **68/68** + bidirectional 48/48 +
+availability-expiry 39/39 + audit 12/12 + p3 6/6 + guards 8/8 + pre-deploy 5/5 + lifecycle 31/31 +
+offer-withdraw 23/23 = **259/259 green**; `npm run build` OK (505.94 kB).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -402,6 +437,7 @@ Remaining known limitations: unchanged, see "Known Limitations" section above.
 - [x] FINAL 26-point deployment verification: 118/118 suites + full lifecycle run (tests/final-lifecycle-run.js) 31/31 - READY (2026-08-20)
 - [x] Post-live-testing fixes: offer-withdraw endpoint + ID-based provider notify + legacy stale-request expiry + 2-min demo expiry - 172/172 green (2026-08-21)
 - [x] End-to-End Self-Test (20-step final gate): 64/64 live checks + full regression 236/236 - DEPLOYMENT GATE PASSED (2026-08-21)
+- [x] Provider Home real-estate (option a) + notification semantics fix + 'X providers viewing' live count (request:viewCount) - 259/259 green (2026-08-21)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

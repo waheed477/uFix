@@ -5,6 +5,7 @@ const Job = require('../models/Job');
 const { findNearbyRequests, findNearbyProviders } = require('../utils/geo');
 const { createNotification } = require('../utils/notify');
 const { expireRequestIfStale, expireStalePendingRequests, REQUEST_EXPIRY_MINUTES } = require('../utils/requestExpiry');
+const { computeMatchingProviders } = require('../utils/viewCount');
 
 const VALID_CATEGORIES = ['plumber', 'electrician', 'mechanic'];
 
@@ -68,41 +69,20 @@ const createRequest = async (req, res) => {
     await request.save();
     await request.populate('customer', 'name phone city profilePicture');
 
+    // "X providers viewing" seed for the customer (2026-08-21, Issue 2): set once the
+    // fan-out list is computed below; returned in the 201 response + emitted live.
+    let viewingCount = 0;
+
     try {
       const io = req.app.get('io');
       if (io) {
-        let nearbyProviders = await findNearbyProviders({ lng: parsedLng, lat: parsedLat, category, city: requestCity, maxDistanceKm: 25, limit: 100 });
-        console.log(`📡 createRequest: Searching providers for category=${category} city=${requestCity||'any'} at [${parsedLng},${parsedLat}]`);
-        console.log(`   Primary search city=${requestCity||'any'} + 25km -> found ${nearbyProviders.length} providers`);
-        if (nearbyProviders.length === 0) {
-          const fallbackProviders = await findNearbyProviders({ lng: parsedLng, lat: parsedLat, category, city: requestCity, maxDistanceKm: 100, limit: 100 });
-          console.log(`   Fallback search city=${requestCity} + 100km -> found ${fallbackProviders.length} providers`);
-          if (fallbackProviders.length > 0 && process.env.NODE_ENV !== 'production') nearbyProviders = fallbackProviders;
-          if (nearbyProviders.length === 0) {
-            const allProviders = await User.find({ role: 'provider' }).select('name category isOnline isVerified location city radiusKm').lean();
-            console.log(`   ❌ No nearby providers found. All providers in DB (${allProviders.length}):`, allProviders.map(p => ({ name: p.name, category: p.category, city: p.city, isOnline: p.isOnline, isVerified: p.isVerified })));
-          }
-        }
-        // Provider Availability Lock (Part 1): busy providers (active job, status != completed)
-        // must NOT be notified about new requests - they can't act on them. Their live tracking
-        // for the active job is unaffected (they stay online); only new-match eligibility is gated.
-        try {
-          const candidateIds = nearbyProviders.map(p => p._id);
-          if (candidateIds.length > 0) {
-            const busyProviderIds = new Set(
-              (await Job.find({ provider: { $in: candidateIds }, status: { $ne: 'completed' } }).select('provider'))
-                .map(j => j.provider.toString())
-            );
-            const before = nearbyProviders.length;
-            nearbyProviders = nearbyProviders.filter(p => !busyProviderIds.has(p._id.toString()));
-            if (process.env.NODE_ENV !== 'production' && before !== nearbyProviders.length) {
-              console.log(`🔒 Availability lock: excluded ${before - nearbyProviders.length} busy provider(s) from request:new fan-out`);
-            }
-          }
-        } catch (busyErr) {
-          console.warn('Busy-provider filter failed (non-blocking, continuing unfiltered):', busyErr.message);
-        }
-
+        // Shared provider matcher (2026-08-21, Issue 2): the exact same logic that
+        // decides who can SEE this request. Extracted to utils/viewCount so the
+        // request:new fan-out and the customer's live "X providers viewing" count can
+        // never disagree (primary 25km + dev-only 100km fallback within the helper).
+        let nearbyProviders = await computeMatchingProviders({ lng: parsedLng, lat: parsedLat, category, city: requestCity });
+        console.log(`📡 createRequest: category=${category} city=${requestCity||'any'} -> ${nearbyProviders.length} eligible providers (online+verified+radius, busy excluded)`);
+        viewingCount = nearbyProviders.length;
         nearbyProviders.forEach(provider => {
           io.to(`user:${provider._id}`).emit('request:new', {
             request: {
@@ -121,18 +101,25 @@ const createRequest = async (req, res) => {
           });
         });
         if (process.env.NODE_ENV !== 'production') console.log(`📤 request:new emitted to ${nearbyProviders.length} nearby ${category} providers for request ${request._id} (city=${requestCity})`);
-        try {
-          for (const provider of nearbyProviders) {
-            await createNotification({ userId: provider._id, type: 'request_new', title: 'New request nearby', body: `${request.category} request in ${requestCity||'your area'}: ${request.description.substring(0, 60)}...`, relatedId: request._id });
-          }
-        } catch (notifyErr) { console.error('Notification creation failed:', notifyErr.message); }
+        // 2026-08-21 notification-semantics correction (Issue 2): NO persisted
+        // 'request_new' bell entry for nearby providers - merely SEEING a request in
+        // their list is not a notification. The live socket event + client sound/vibration
+        // cue is sufficient; the bell stays reserved for actions tied to the provider
+        // personally (offer accepted/declined/rejected, or request cancelled/expired
+        // after they offered). Legacy request_new entries stay renderable client-side.
+        // Customer side: live "X providers viewing your request" indicator.
+        io.to(`user:${request.customer._id}`).emit('request:viewCount', {
+          requestId: request._id,
+          count: viewingCount,
+          category
+        });
       }
     } catch (socketErr) { console.error('Socket emit request:new failed:', socketErr.message); }
 
     return res.status(201).json({
       status: 'success',
       message: 'Request created successfully',
-      request: { id: request._id, customer: request.customer, category: request.category, description: request.description, location: request.location, readable: { lng: request.location.coordinates[0], lat: request.location.coordinates[1] }, address: request.address, city: request.city, status: request.status, cancelledReason: request.cancelledReason, expiresAt: request.expiresAt, createdAt: request.createdAt }
+      request: { id: request._id, customer: request.customer, category: request.category, description: request.description, location: request.location, readable: { lng: request.location.coordinates[0], lat: request.location.coordinates[1] }, address: request.address, city: request.city, status: request.status, cancelledReason: request.cancelledReason, expiresAt: request.expiresAt, createdAt: request.createdAt, viewingProviders: { count: viewingCount, category } }
     });
   } catch (error) {
     console.error('CreateRequest error:', error);

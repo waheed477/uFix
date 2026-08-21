@@ -349,8 +349,8 @@ export function ProviderHome() {
           <NotificationBell />
         </div>
 
-        <div className={cn("relative overflow-hidden rounded-3xl p-5 text-white transition-colors duration-500", online ? "bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800" : "bg-gradient-to-br from-ink-800 to-ink-900")}>
-          <div className="pointer-events-none absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
+        <div className={cn("relative overflow-hidden rounded-3xl p-4 text-white transition-colors duration-500", online ? "bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800" : "bg-gradient-to-br from-ink-800 to-ink-900")}>
+          <div className="pointer-events-none absolute -right-8 -top-10 h-24 w-24 rounded-full bg-white/10 blur-2xl" />
           <div className="relative flex items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -384,43 +384,28 @@ export function ProviderHome() {
             { label: "Jobs done", value: `${user?.jobsCompleted ?? 0}`, icon: <BriefcaseIcon className="h-4 w-4" /> },
             { label: "Rating", value: `${user?.rating ?? 4.8}★`, icon: <Stars value={user?.rating ?? 4.8} size={12} /> },
           ].map((s, i) => (
-            <div key={i} className="rounded-2xl bg-white p-3 shadow-card">
+            <div key={i} className="rounded-2xl bg-white p-2.5 shadow-card">
               <div className="mb-1 flex items-center gap-1.5 text-ink-400">{s.icon}</div>
-              <p className="font-display text-lg font-extrabold text-ink-900">{s.value}</p>
+              <p className="font-display text-base font-extrabold text-ink-900">{s.value}</p>
               <p className="text-[11px] font-medium text-ink-500">{s.label}</p>
             </div>
           ))}
         </div>
 
-        {/* Your offers - live fate of every offer this provider sent (Bidirectional Sync Part D) */}
-        {myOffers.length > 0 && (
-          <div className="animate-slide-up">
-            <div className="mb-2 flex items-center justify-between px-1">
-              <h2 className="font-display text-sm font-bold text-ink-900">Your offers · live</h2>
-              <span className="text-[11px] font-medium text-ink-400">
-                {myOffers.filter(o => o.status === 'pending').length} waiting
-              </span>
-            </div>
-            <div className="space-y-2.5">
-              {myOffers.slice(0, 4).map((o) => (
-                <MyOfferCard key={o.id} offer={o} onOpenJob={openActiveJob} onDismiss={() => dismissMyOffer(o.id)} onWithdraw={() => withdrawOffer(o.id)} isWithdrawing={!!isLoading['withdrawOffer']} />
-              ))}
+
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
+        {!providerBusy && (
+          <div className="mb-2.5 mt-1 flex items-center justify-between">
+            <h2 className="font-display text-base font-bold text-ink-900">Requests in {location.city} · Live distance</h2>
+            <div className="flex items-center gap-2">
+              {online && nearbyRequests.length > 0 && <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700">{nearbyRequests.length} new</span>}
+              {online && <button onClick={() => refreshNearbyRequests()} disabled={isLoadingNearby} className="tap-highlight-none rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink-600 shadow-card active:scale-95 disabled:opacity-50">{isLoadingNearby ? "..." : "Refresh"}</button>}
             </div>
           </div>
         )}
-      </div>
 
-      {!providerBusy && (
-        <div className="flex items-center justify-between px-4 pb-2.5">
-          <h2 className="font-display text-base font-bold text-ink-900">Requests in {location.city} · Live distance</h2>
-          <div className="flex items-center gap-2">
-            {online && nearbyRequests.length > 0 && <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700">{nearbyRequests.length} new</span>}
-            {online && <button onClick={() => refreshNearbyRequests()} disabled={isLoadingNearby} className="tap-highlight-none rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink-600 shadow-card active:scale-95 disabled:opacity-50">{isLoadingNearby ? "..." : "Refresh"}</button>}
-          </div>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto px-4 pb-4">
         {providerBusy ? (
           // Availability lock: cards hidden entirely (server returns none anyway) - seeing
           // offers you can't act on would be confusing (documentation: project_context Part 1)
@@ -448,6 +433,23 @@ export function ProviderHome() {
             {nearbyRequests.map((r) => (
               <RequestCard key={r.id} req={r} onSend={(charge) => sendOffer(r.id, charge)} isSending={isSendingOffer} providerCoords={effectiveCoords} />
             ))}
+          </div>
+        )}
+
+        {/* Your offers - live fate of every offer this provider sent (Bidirectional Sync Part D) */}
+        {myOffers.length > 0 && (
+          <div className="mt-4 animate-slide-up">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <h2 className="font-display text-sm font-bold text-ink-900">Your offers · live</h2>
+              <span className="text-[11px] font-medium text-ink-400">
+                {myOffers.filter(o => o.status === 'pending').length} waiting
+              </span>
+            </div>
+            <div className="space-y-2.5">
+              {myOffers.slice(0, 4).map((o) => (
+                <MyOfferCard key={o.id} offer={o} onOpenJob={openActiveJob} onDismiss={() => dismissMyOffer(o.id)} onWithdraw={() => withdrawOffer(o.id)} isWithdrawing={!!isLoading['withdrawOffer']} />
+              ))}
+            </div>
           </div>
         )}
       </div>

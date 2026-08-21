@@ -263,6 +263,29 @@ function OfferCard({ offer, onAccept, onDecline, index, isAccepting }: { offer: 
   );
 }
 
+// Live "X providers viewing your request" pill (2026-08-21, Issue 2): the customer-side
+// counterpart of the provider request:new fan-out. Seeded from the create response, kept
+// live via the request:viewCount socket (re-emitted on provider online/offline transitions).
+function ViewingPill({ requestId, category }: { requestId?: string | null; category?: string }) {
+  const { viewCounts } = useApp();
+  if (!requestId) return null;
+  const view = viewCounts[requestId];
+  if (!view) return null;
+  const cat = (view.category || category || 'provider') as any;
+  const plural = (categoryById(cat)?.plural || `${cat}s`).toLowerCase();
+  return (
+    <div className="flex items-center gap-2.5 rounded-2xl border border-brand-100 bg-brand-50 px-4 py-2.5">
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-600" />
+      </span>
+      <p className="text-xs font-semibold text-brand-700">
+        {view.count > 0 ? `${view.count} ${plural} viewing your request · Live` : `Finding ${plural} in your city… they appear here live`}
+      </p>
+    </div>
+  );
+}
+
 export function OffersScreen() {
   const { back, jobs, activeRequestId, acceptOffer, declineOffer, cancelRequest, isLoading, location, navigate } = useApp();
   const [sort, setSort] = useState<"price" | "eta">("price");
@@ -370,6 +393,9 @@ export function OffersScreen() {
           <div className="mt-1.5 flex items-center gap-1.5 text-xs text-ink-500"><MapPinIcon className="h-3.5 w-3.5" /> {request.address} · {location.city}<span className="text-ink-300">·</span><span className="font-semibold text-brand-700">{meta.label}</span></div>
         </div>
       </header>
+      {(request.status === 'open' || (request as any)._originalStatus === 'pending') && (
+        <div className="px-4 pt-3"><ViewingPill requestId={request.id} category={request.category} /></div>
+      )}
       {sortedOffers.length > 0 && (
         <div className="flex items-center gap-2 px-4 pt-3">
           <span className="text-xs font-medium text-ink-500">Sort by</span>
@@ -481,6 +507,7 @@ export function AvailableProvidersScreen() {
           <p className="text-sm font-semibold text-emerald-800">📍 {request.address} • {location.city}</p>
           <p className="mt-1 text-xs text-emerald-600">Showing only online verified {request.category} providers in {location.city} with their profile price. No need to wait for offers - book directly!</p>
         </div>
+        <div className="mt-2.5"><ViewingPill requestId={request.id} category={request.category} /></div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4">

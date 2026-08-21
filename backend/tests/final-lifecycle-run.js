@@ -177,8 +177,8 @@ const FSD = { lng: 73.0776, lat: 31.4181, city: 'Faisalabad' };
         'the customer IS the accepting actor and gets instant UI feedback instead)',
     ['new_offer', 'job_status_update', 'new_rating'].every((t) => typesC.includes(t)) &&
       typesC.filter((t) => t === 'job_status_update').length >= 3, typesC);
-  check('provider trail has request_new + offer_declined + offer_accepted + new_rating',
-    ['request_new', 'offer_declined', 'offer_accepted', 'new_rating'].every((t) => typesP.includes(t)), typesP);
+  check('provider trail has offer_declined + offer_accepted + new_rating, and NO request_new (2026-08-21 semantics: seeing != notification)',
+    ['offer_declined', 'offer_accepted', 'new_rating'].every((t) => typesP.includes(t)) && !typesP.includes('request_new'), typesP);
 
   // ---- friction observations ----
   const cOffers = typesC.filter(t => t === 'new_offer').length;

@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const { uploadFromBuffer } = require('../config/cloudinary');
+const { reemitViewCountsForProvider } = require('../utils/viewCount');
 
 /**
  * User Profile Controller - Phase 2
@@ -161,6 +162,19 @@ const updateProfile = async (req, res) => {
         status: 'error',
         message: 'User not found'
       });
+    }
+
+    // 2026-08-21 (Issue 2): a provider's online/offline toggle changes how many providers
+    // can currently SEE each pending request in their city+category - push refreshed
+    // request:viewCount to those customers so the "X providers viewing" pill stays live.
+    // Fire-and-forget; never blocks or fails the profile update itself.
+    if (isOnline !== undefined && user.role === 'provider') {
+      try {
+        const io = req.app.get('io');
+        if (io) reemitViewCountsForProvider(io, user).catch((e) => console.error('viewCount re-emit failed:', e.message));
+      } catch (e) {
+        console.error('viewCount re-emit setup failed:', e.message);
+      }
     }
 
     return res.status(200).json({

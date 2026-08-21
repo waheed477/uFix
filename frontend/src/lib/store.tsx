@@ -179,6 +179,9 @@ interface AppContextValue {
   // Availability & Expiry pass - true while the provider has an active job (busy):
   // nearby request cards are hidden + offers blocked (mirrors backend enforcement)
   providerBusy: boolean;
+  /** Live "X providers viewing your request" counts per open request id (2026-08-21 Issue 2).
+      Fed by POST /requests response + request:viewCount socket (creation + provider online/offline). */
+  viewCounts: Record<string, { count: number; category: string }>;
 
   // new for Phase 9 - exposed for screens that need real data
   notifications: any[];
@@ -248,6 +251,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // While busy, the backend returns zero nearby requests (hasActiveJob) and rejects new offers;
   // this flag drives the calm banner + hides request cards client-side as well.
   const [providerBusy, setProviderBusy] = useState(false);
+  const [viewCounts, setViewCounts] = useState<Record<string, { count: number; category: string }>>({});
 
   /** Mark sent offers' fate. Pass offerId or requestId matcher. */
   const markMyOffers = useCallback((matcher: { offerId?: string; requestId?: string }, status: SentOfferStatus) => {
@@ -459,6 +463,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.error('Failed to handle request:new', e);
       }
     });
+    // request:viewCount → customer (2026-08-21, Issue 2): "X providers viewing your request"
+    // live indicator. Emitted at request creation and re-emitted on provider online/offline
+    // transitions; count = matching (online+verified+radius, non-busy) providers.
+    const offRequestViewCount = socketClient.on('request:viewCount', (data: any) => {
+      try {
+        const rid = (data?.requestId ?? data?.request?.id)?.toString();
+        if (!rid) return;
+        setViewCounts(prev => ({ ...prev, [rid]: { count: Number(data.count) || 0, category: data.category || prev[rid]?.category } }));
+      } catch (e) { console.error('Failed to handle request:viewCount', e); }
+    });
+
 
     // Offer:new → customer gets new offer
     const offOfferNew = socketClient.on('offer:new', (data: any) => {
@@ -584,6 +599,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const offRequestCancelled = socketClient.on('request:cancelled', (data: any) => {
       console.log('[Store] Received request:cancelled', data);
       const cancelledId = data.requestId;
+      if (cancelledId) setViewCounts(prev => { const next = { ...prev }; delete next[cancelledId.toString()]; return next; });
       setNearbyRequests(prev => prev.filter(r => r.id !== cancelledId));
       if (cancelledId) markMyOffers({ requestId: cancelledId.toString() }, 'cancelled');
       showToast('Request cancelled by customer', 'info');
@@ -595,6 +611,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.log('[Store] Received request:expired', data);
       const expiredId = data.requestId?.toString();
       if (!expiredId) return;
+      setViewCounts(prev => { const next = { ...prev }; delete next[expiredId]; return next; });
 
       if (user.role === 'customer') {
         // Flip their own request to cancelled-with-reason so Jobs/History show "Expired"
@@ -773,6 +790,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return () => {
       offRequestNew();
+      offRequestViewCount();
       offOfferNew();
       offOfferAccepted();
       offOfferRejected();
@@ -1260,6 +1278,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setJobs(prev => [frontendJob, ...prev]);
       setActiveRequestId(frontendJob.id);
       persistActiveRequestId(frontendJob.id); // Persist for refresh survival
+      // Seed the live "X providers viewing" count from the create response (socket echo may arrive first)
+      if ((backendRequest as any)?.viewingProviders) {
+        const vp = (backendRequest as any).viewingProviders;
+        setViewCounts(prev => ({ ...prev, [frontendJob.id]: { count: Number(vp.count) || 0, category: vp.category || category } }));
+      }
       setStack(['availableProviders']); // NEW: Direct discovery model - show available providers with price from profile, not offers wait
       
       showToast(`Request posted in ${location.city || user?.city || 'your city'}! Finding ${category} pros...`, 'check');
@@ -1290,6 +1313,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await refreshJobs();
 
       // Set active job and clear active request
+      setViewCounts(prev => { const next = { ...prev }; delete next[jobId]; return next; }); // request settled - stop "viewing" pill
       setActiveJobId(acceptedJobId.toString());
       setActiveRequestId(null);
       persistActiveRequestId(null);
@@ -1348,6 +1372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLoading('cancelRequest', true);
       await api.requests.cancel(jobId);
 
+      setViewCounts(prev => { const next = { ...prev }; delete next[jobId]; return next; });
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'cancelled' as any } : j));
       setActiveRequestId(null);
       persistActiveRequestId(null);
@@ -1997,6 +2022,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     completeJob,
     myOffers,
     providerBusy,
+    viewCounts,
     sendOffer,
     updateJobStatus,
     openChat,
