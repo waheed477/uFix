@@ -351,6 +351,47 @@ Live suite proves one request's lifecycle yields **A=withdrawn, B=accepted, C=re
 
 **Verification (all live, final code):** offer-withdraw suite **23/23** + FULL regression: 48/48 + 39/39 + 12/12 + 6/6 + 8/8 + 5/5 + lifecycle 31/31 = **172/172 green**; `npm run build` OK (504.23 kB).
 
+## End-to-End Self-Test — 2026-08-21 (final deployment gate)
+
+Full 20-step workflow re-verified LIVE on final code: real OTP signups, real Socket.io
+sessions, real DB state — new suite `backend/tests/e2e-self-test.js` (**64 checks, 64/64 PASS**).
+Actors: 2 customers + 2 providers, same city (Faisalabad), plumber.
+
+**Every workflow step, with the actual evidence asserted:**
+1. Customer OTP signup + city + location persisted — profile city=Faisalabad.
+2. Provider setup (category/radius/price) + **real multipart document upload** (field `document`, 200) + dev auto-verify + online — persisted `isVerified: true` re-fetched.
+3. Matching request created 201.
+4. Provider got `request:new` exactly ONCE, then **3 consecutive nearby polls produced NO duplicate** (socket count still 1, persisted request_new for that request still 1) — the Issue-1 fix holds; frontend notify guard is ID-based (static).
+5. Edited-price offer 650 (profile default 500) saved verbatim — 201.
+6. Customer `offer:new` live + persisted `new_offer`.
+7. 2nd customer's request → offer → **WITHDRAW**: 200 `withdrawn`; 2nd customer `offer:withdrawn` LIVE (correct offerId+requestId) + persisted `offer_withdrawn`; UI badges distinct in source (sky `↩ Withdrawn by you` vs rose `✗ Declined` vs grey `Not selected`).
+8. Decline: 200; provider `offer:declined` live + persisted.
+9. Re-offer on declined offer REVIVES same id at new price 520, pending; second provider's offer coexists (customer sees exactly 2 pending).
+10. Accept → 200; Job visible via my/active (`on_the_way`); GET /jobs/:id shows **both phones unlocked** (+92 both sides); accept path auto-navigates to Active Job (static wire check); provider got `offer:accepted`.
+11. Other offer auto-`rejected` simultaneously with P1 `accepted` (DB state); provider got `offer:rejected` live + persisted; the R2 withdrawn offer STILL `withdrawn` (accept no longer clobbers).
+12. Cancel CTA in offers screen (static) + PATCH cancel 200; offering provider got `request:cancelled` live + persisted — **even though his offer was withdrawn** (request-level fan-out).
+13. Status ladder on_the_way→arrived→in_progress→completed: every hop 200 + live `job:statusUpdate` (`newStatus` key) on the customer; skip 400, backward 400 (twice).
+    **Terminal-state contract verified:** `completed→arrived` → 400; duplicate `completed→completed` is the DELIBERATE idempotent-200 (early return before save/emit/notify) — asserted NO re-notify (socket count unchanged) + `completedAt` unchanged. Not a bug; documented design, now test-locked.
+14. Completion persisted `job_status_update` on BOTH bells; completed→rating auto-prompt wiring (`setStack(['rating'])` + role-aware copy) statically locked.
+15. Ratings 5★ (customer→provider) + 4★ (provider→customer) 201; profiles re-fetched: provider rating 5/1 review, customer 4/1; duplicates 400 both ways; `new_rating` persisted to both.
+16. Chat both directions live (nested `{message:{text}}` payload), ack success, `chat:read` receipt to the sender, history has readAt set.
+17. Completed job in BOTH order histories; cancelled R2 in 2nd customer's Cancelled history with `cancelledReason: 'customer'`.
+18. Bell trails complete both sides (customer: new_offer/job_status_update/new_rating/new_message; provider: request_new/offer_declined/offer_accepted/request_cancelled/job_status_update/new_rating; 2nd customer: new_offer/offer_withdrawn) + single mark-read decrements unreadCount by exactly 1 + read-all zeroes it.
+19. Expiry via sanctioned dev override (0.03 min ≈ 1.8s): read flips to cancelled/`expired`, pending offer auto-rejected, provider `request:expired` live + persisted; history shows `expired` vs R2's `customer` — distinguishable.
+20. Busy-lock: with an active job, NO `request:new` for a new matching request (server fan-out exclusion), nearby empty + `hasActiveJob: true`, offer attempt → **400 PROVIDER_BUSY**; a FREE provider could still offer on the same request (lock is per-provider); lock released on completion.
+
+**What broke during the run:** nothing in the app. First run was 57/7 — all 7 were
+test-side wrong assumptions (payload key `newStatus` vs `status`; nested chat payload;
+stale bell snapshot re-used across the chat step; expecting 400 where the deliberate
+idempotent-200 same-status contract applies). Test corrected and re-verified. No app
+code was changed in this pass.
+
+**Full regression after the run (one clean dev-inmemory session, final code):**
+self-test 64/64 · bidirectional 48/48 · availability-expiry 39/39 · audit 12/12 ·
+p3-city-sync 6/6 · guards 8/8 · pre-deploy 5/5 · final-lifecycle 31/31 ·
+offer-withdraw 23/23 = **236/236 green**. `npm run build` OK (504.23 kB).
+Remaining known limitations: unchanged, see "Known Limitations" section above.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -360,6 +401,7 @@ Live suite proves one request's lifecycle yields **A=withdrawn, B=accepted, C=re
 - [x] Pre-Deployment pass: Item 1 phone dead-end FIXED (read-only), Item 2 photo upload wired live, Item 3 Home reminder added, Item 4 documented - 118/118 green (2026-08-20)
 - [x] FINAL 26-point deployment verification: 118/118 suites + full lifecycle run (tests/final-lifecycle-run.js) 31/31 - READY (2026-08-20)
 - [x] Post-live-testing fixes: offer-withdraw endpoint + ID-based provider notify + legacy stale-request expiry + 2-min demo expiry - 172/172 green (2026-08-21)
+- [x] End-to-End Self-Test (20-step final gate): 64/64 live checks + full regression 236/236 - DEPLOYMENT GATE PASSED (2026-08-21)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 
