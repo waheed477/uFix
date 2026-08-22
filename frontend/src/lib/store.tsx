@@ -73,7 +73,7 @@ import {
 } from "./location";
 import { api, getToken, setToken, setStoredUser, getStoredUser, clearAuth, setAuthSession, getRefreshToken } from "./api";
 import { socketClient } from "./socket";
-import { notifyAlert } from "./sound";
+import { playNotificationTone, playNewRequestTone, playBookingConfirmedTone, vibrateAlert } from "./sound";
 import {
   adaptBackendUserToFrontendUser,
   adaptBackendRequestToFrontendJob,
@@ -463,7 +463,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // BUG 2 FIX: Play sound + vibration for provider when new matching request arrives
         // This must happen WITHOUT requiring manual refresh - card appears via setNearbyRequests above
         // (sound/vibration implementation deduplicated into lib/sound.ts - shared with other live events)
-        notifyAlert('new-request');
+        // New-request alert tone, id-deduped with the poll sentinel in provider.tsx (sound system).
+        playNewRequestTone(String(backendRequest.id ?? backendRequest._id ?? ''));
 
         showToast(`New ${backendRequest.category} request in ${backendRequest.city || 'your city'} nearby`, 'info');
       } catch (e) {
@@ -519,7 +520,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
           // Bidirectional Sync: mark this provider's own sent offer as accepted + celebratory feedback
           if (data.offer?.id) markMyOffers({ offerId: data.offer.id.toString() }, 'accepted');
-          notifyAlert('positive');
+          // Booking confirmation tone (customer + provider); offerId dedups the accept-action path below.
+          playBookingConfirmedTone(data.offer?.id != null ? String(data.offer.id) : undefined);
 
           // Availability lock: this handler also fires for customers - only the PROVIDER
           // whose offer was accepted becomes busy (their job room gets this same event)
@@ -575,7 +577,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const offOfferDeclined = socketClient.on('offer:declined', (data: any) => {
       console.log('[Store] Received offer:declined', data);
       if (data.offerId) markMyOffers({ offerId: data.offerId.toString() }, 'declined');
-      notifyAlert('negative');
+      vibrateAlert('negative'); // ping standardized via persisted offer_declined notification
       showToast('Customer declined your offer — you can send a revised one', 'info');
     });
 
@@ -666,7 +668,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // - Customer: "Your job is complete!" → rate the provider
         // - Provider: confirmation on their side too → rate the customer (Phase 8 supports both directions)
         if (newStatus === 'completed') {
-          notifyAlert('positive');
+          vibrateAlert('positive'); // ping via persisted notif
           // Availability lock released: provider is free to receive new matches again
           if (user.role === 'provider') setProviderBusy(false);
           setActiveJobId(jobId);
@@ -788,6 +790,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return [adapted, ...prev];
         });
         setUnreadCount(prev => prev + 1);
+
+        // Standardized general ping for ALL persisted notifications - EXCEPT types that own a
+        // dedicated tone: offer_accepted (booking tone) and request_new (ID-tracked request alert;
+        // no longer persisted since 2026-08-21). See sound.ts for tone definitions.
+        const ntype = (data.notification as any)?.type;
+        if (ntype !== 'offer_accepted' && ntype !== 'request_new') {
+          playNotificationTone(String((data.notification as any)?.id ?? (data.notification as any)?._id ?? adapted.id ?? ''));
+        }
 
         showToast(notification.title || 'New notification', 'info');
       } catch (e) {
@@ -1331,6 +1341,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       persistActiveRequestId(null);
       setStack(['activeJob']);
       setTabState('jobs');
+      // Booking confirmation tone at the exact accept-success moment.
+      playBookingConfirmedTone(String(offer.id ?? '')); // deduped with socket path by offerId
 
       console.log(`[acceptOffer] Set activeJobId to ${acceptedJobId}, navigated to activeJob`);
     } catch (err: any) {
@@ -1585,7 +1597,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // supports both directions). The job:statusUpdate socket handler mirrors this for the
         // customer side; both paths converge on the Rating screen idempotently.
         showToast('Job completed! 🎉 Rate your customer', 'check');
-        notifyAlert('positive');
+        playNotificationTone(); // actor gets no self-notification - ping here
+        vibrateAlert('positive');
         setActiveJobId(jobId);
         setTabState('jobs');
         setStack(['rating']);

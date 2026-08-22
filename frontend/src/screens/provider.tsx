@@ -15,7 +15,7 @@ import { useApp } from "@/lib/store";
 import { categoryById, type IncomingRequest, type SentOffer } from "@/lib/types";
 import { NotificationBell } from "@/components/notifications";
 import { calculateDistanceKm, watchPosition, clearWatch, type Coords } from "@/lib/location";
-import { notifyAlert } from "@/lib/sound";
+import { playNewRequestTone } from "@/lib/sound";
 import {
   Avatar,
   BanknoteIcon,
@@ -323,7 +323,12 @@ export function ProviderHome() {
     const fresh = ids.filter((id) => id && !known.has(id));
     if (fresh.length > 0) {
       console.log(`[Provider] ${fresh.length} genuinely NEW request(s) (${fresh.join(', ')}) - sound+vibration`);
-      if (online && !providerBusy) notifyAlert('new-request');
+      if (online && !providerBusy) {
+        // Per-id play so the shared dedup in sound.ts marks them heard (the request:new
+        // socket handler can't double-alert the same id, and vice versa). The global
+        // min-gap collapses a multi-request burst into ONE audible tone.
+        fresh.forEach((id) => playNewRequestTone(id));
+      }
       fresh.forEach((id) => known.add(id));
     }
     // Prune ids that vanished so unbounded growth of the set doesn't matter over long sessions

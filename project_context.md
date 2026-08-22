@@ -474,6 +474,31 @@ Conflict guard: if the phone row is already linked to a DIFFERENT googleId → *
 
 **Verification (fresh dev-inmemory server, final code, all real API calls):** new suite `backend/tests/auth-flow.js` **29/29 green** (8 static contract guards + 4 live OTP + 5 live provider-resume matrix + 6 live dual-token/revoke/multi-device + 5 in-process Google reconciliation + 1 env-limited skip); full battery incl. all prior suites = **288/288 green** (`tests/run.sh` — guards untouched, BUG A/B intact); `npm run build` OK (507.58 kB).
 
+## Professional Sound System (3 distinct tones) — 2026-08-21
+
+Audio cues in `frontend/src/lib/sound.ts`, all synthesized with the **Web Audio API** (oscillators + gain envelopes) — still **zero external audio files, zero new dependencies**. Soft attack (~20ms) + exponential release on every note; no square waves, nothing arcade-like.
+
+### The three tones
+| Export | Character | Duration | Volume | Fired on |
+|---|---|---|---|---|
+| `playNotificationTone(notificationId?)` | gentle rising two-note ping, sine E5(659.25)→A5(880) | ~0.25s | peak 0.10-0.12 (subtle) | EVERY persisted notification: new_offer, offer_declined, offer_rejected, offer_withdrawn, request_cancelled, request_expired, job_status_update, new_message, new_rating |
+| `playNewRequestTone(requestId?)` | weightier downward attention sweep 880→440 (+ vibrate [200,100,200]) | ~0.65s | 0.26 | genuinely NEW request for a provider (socket `request:new` AND the 5s poll sentinel) — established alert identity from earlier fixes, kept distinct |
+| `playBookingConfirmedTone(offerId?)` | ascending C5-E5-G5 major arpeggio, last note rings (+ vibrate [120,60,120]) | ~0.6s | 0.14-0.15 | offer ACCEPTED — both customer (their accept action success, before auto-navigate to Active Job) AND provider (`offer:accepted` live event) |
+
+### Trigger topology (audio layer ON TOP of existing correct events; no notification logic touched)
+- **`notification:new` handler plays the ONE standardized ping** for all persisted types — EXCLUDING `offer_accepted` (booking tone owns it) and `request_new` (no longer persisted since 2026-08-21; ID-tracked request alert owns it). This makes chat messages, declines, withdrawals, cancels, expiries, status updates and ratings — several of which previously had NO sound — consistent with a single subtle ping.
+- `offer:declined` and the `job:statusUpdate` completed handlers are now **vibration-only** (their audible cue arrives via the persisted notification ping from exactly one place). The provider who MARKS a job complete is the actor (no self-notification by design) → his side pings `playNotificationTone()` directly at the action.
+- Booking moment wired at BOTH arrival paths (`acceptOffer()` success + `offer:accepted` socket) with **offerId-keyed dedup** — whichever arrives first sounds, the other silently no-ops.
+
+### De-duplication & anti-stacking (inside sound.ts)
+- `claimAudible(key, ttl)` — TTL'd one-shot keys: a notification/booking/request id can never sound twice (10s ids, 5min request ids; map pruned over 300 entries).
+- Global `MIN_TONE_GAP_MS = 550` — no two AUDIBLE tones overlap; a burst of 3 rapid notifications collapses into ONE ping. Haptics are independent (a genuinely-new request still vibrates even if its audible sweep was gap-collapsed) because vibration never stacks audibly.
+- **Bug fixed by design here:** the old new-request alert could fire TWICE for one request (socket handler + 5s poll sentinel each saw it "fresh" in their own ref). Now both call `playNewRequestTone(requestId)` into the SHARED dedup — exactly one alert per request id, whatever the source (LIVE-proven: same `{request:{id}}` payload only sounds once).
+- Cross-source proven at unit level: compiled `sound.ts` (esbuild) executed in node against a mock AudioContext — scheduled notes/frequencies/spans asserted — plus a LIVE feed-through: real two-user sockets on the running backend captured real `offer:accepted` / `notification:new(offer_accepted)` / `request:new` payloads, fed through the compiled module EXACTLY as store.tsx does → accept produced exactly one 3-note arpeggio, zero general pings, one new_message ping.
+- Sounds still play while the tab is hidden ON PURPOSE (chat/offer pings are useful in another tab); only the gap + dedup protect against noise. `resetSoundGuardsForTests()` exists for the test harness.
+
+**Verification (fresh dev-inmemory server):** new suite `backend/tests/sound-system.js` **19/19** (S1-S6 static wiring guards + U1-U8 compiled-module units [tone shapes, durations, per-id dedup, 550ms anti-stack gap, cross-tone suppression, legacy back-compat] + L1-L4 live socket feed-throughs); adapted `notification-view-count.js` L3 guard to the new helper name with the SAME locked intent (ID tracking wired + an alert helper called — helper name no longer hardcoded); full battery **307/307 green**; `npm run build` OK (508.73 kB). BUG A/B guards untouched (8/8).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -486,6 +511,7 @@ Conflict guard: if the phone row is already linked to a DIFFERENT googleId → *
 - [x] End-to-End Self-Test (20-step final gate): 64/64 live checks + full regression 236/236 - DEPLOYMENT GATE PASSED (2026-08-21)
 - [x] Provider Home real-estate (option a) + notification semantics fix + 'X providers viewing' live count (request:viewCount) - 259/259 green (2026-08-21)
 - [x] Returning User Login & Session Persistence: isNewUser/setupComplete contract (backend = single source of truth), googleId>phone linking no duplicates, dual-token refresh + server-side revocation, silent single-flight frontend refresh, partial-setup resume - 288/288 green (2026-08-21)
+- [x] Professional Sound System: 3 distinct Web-Audio tones (general ping / new-request sweep / booking C5-E5-G5 arpeggio), per-id dedup + 550ms anti-stack gap, live feed-through proven - 307/307 green (2026-08-21)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

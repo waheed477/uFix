@@ -73,7 +73,7 @@ const ROOT = path.join(__dirname, '..', '..');
   check('L2 compact fixed top (slim toggle card p-4, compact stats p-2.5) — requests own the screen',
     prov.includes('overflow-hidden rounded-3xl p-4 text-white') && prov.includes('rounded-2xl bg-white p-2.5 shadow-card'));
   check('L3 ID-based no-repeat notification tracking preserved (knownRequestIdsRef still wired)',
-    prov.includes('knownRequestIdsRef') && prov.includes('notifyAlert'));
+    prov.includes('knownRequestIdsRef') && (prov.includes('notifyAlert') || prov.includes('playNewRequestTone(')));
   check('L4 busy-lock focus-mode + offline states preserved in the scroll region',
     prov.includes('Focus mode: one job at a time') && prov.includes("You're offline"));
 
