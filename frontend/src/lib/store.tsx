@@ -74,6 +74,7 @@ import {
 import { api, getToken, setToken, setStoredUser, getStoredUser, clearAuth, setAuthSession, getRefreshToken } from "./api";
 import { socketClient } from "./socket";
 import { playNotificationTone, playNewRequestTone, playBookingConfirmedTone, vibrateAlert } from "./sound";
+import { reconcileNearbyRequests } from "./listReconcile";
 import {
   adaptBackendUserToFrontendUser,
   adaptBackendRequestToFrontendJob,
@@ -1765,11 +1766,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // --- Refresh functions ---
-  const refreshNearbyRequests = useCallback(async () => {
+  const refreshNearbyRequests = useCallback(async (opts?: { silent?: boolean }) => {
     if (user?.role !== 'provider') return;
+    // 2026-08-22 flicker fix: background 5s polls are SILENT. Only manual refreshes (and the
+    // first load) show the skeleton; before this, every poll swapped the card list for
+    // skeletons, unmounting every card -> entrance animation re-triggered (blinking) AND
+    // the in-progress edited price input reset to the base price (hidden-cause of BUG 2).
+    const silent = !!opts?.silent;
 
     try {
-      setLoading('nearbyRequests', true);
+      if (!silent) setLoading('nearbyRequests', true);
       const data = await api.requests.nearby();
       const backendRequests = data.requests || [];
 
@@ -1783,7 +1789,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         adaptBackendRequestToIncomingRequest(req, { baseCoords: location.coords || DEFAULT_COORDS })
       );
 
-      setNearbyRequests(adapted);
+      // Render stability: identical content -> identical array reference (no re-render at
+      // all); otherwise unchanged cards keep their previous object identity so a live-distance
+      // number updates WITHOUT the whole card re-flashing or losing input state.
+      setNearbyRequests(prev => reconcileNearbyRequests(prev, adapted));
     } catch (err: any) {
       console.error('Failed to refresh nearby requests', err);
       const msg = err.message || '';
@@ -1844,7 +1853,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         showToast('Complete provider setup first', 'info');
       }
     } finally {
-      setLoading('nearbyRequests', false);
+      if (!silent) setLoading('nearbyRequests', false);
     }
   }, [user?.role, location.coords]);
 

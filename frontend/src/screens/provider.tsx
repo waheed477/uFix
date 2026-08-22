@@ -53,12 +53,17 @@ function RequestCard({
   req, 
   onSend, 
   isSending, 
-  providerCoords 
+  providerCoords,
+  animateIn = true,
 }: { 
   req: IncomingRequest; 
   onSend: (charge: number) => void; 
   isSending?: boolean;
   providerCoords?: Coords | null;
+  // 2026-08-22 flicker fix: entrance animation plays ONLY when this request id was just
+  // seen (parent derives it from the ID-tracking set). Previously every card re-animated
+  // whenever a poll remounted the list -> visible blinking on each 5s cycle.
+  animateIn?: boolean;
 }) {
   const meta = categoryById(req.category);
   const { user } = useApp();
@@ -118,7 +123,7 @@ function RequestCard({
   }, [req.createdAt]);
 
   return (
-    <div className="animate-slide-up rounded-2xl bg-white p-4 shadow-card border border-transparent hover:border-brand-200 transition-all">
+    <div className={cn(animateIn && "animate-slide-up", "rounded-2xl bg-white p-4 shadow-card border border-transparent hover:border-brand-200 transition-all")}>
       {/* Header: Customer + Time + Urgency */}
       <div className="flex items-start gap-3">
         <div className="relative">
@@ -290,9 +295,11 @@ export function ProviderHome() {
   // Refresh nearby on mount and when online, plus polling every 5s when online (BUG 2 fallback)
   useEffect(() => {
     if (online) {
+      // Background polls are SILENT (no skeleton swap) - first load right here still shows
+      // the skeleton because it is not silent.
       refreshNearbyRequests();
       const interval = setInterval(() => {
-        refreshNearbyRequests();
+        refreshNearbyRequests({ silent: true });
       }, 5000);
       return () => clearInterval(interval);
     }
@@ -436,7 +443,16 @@ export function ProviderHome() {
         ) : (
           <div className="space-y-3">
             {nearbyRequests.map((r) => (
-              <RequestCard key={r.id} req={r} onSend={(charge) => sendOffer(r.id, charge)} isSending={isSendingOffer} providerCoords={effectiveCoords} />
+              <RequestCard
+                key={r.id}
+                req={r}
+                onSend={(charge) => sendOffer(r.id, charge)}
+                isSending={isSendingOffer}
+                providerCoords={effectiveCoords}
+                // Animate ONLY on first appearance: id not yet in the session-seen set at
+                // render time = genuinely new; next render it has been marked known.
+                animateIn={!(knownRequestIdsRef.current?.has(String((r as any).id ?? (r as any)._id ?? '')))}
+              />
             ))}
           </div>
         )}

@@ -499,6 +499,25 @@ Audio cues in `frontend/src/lib/sound.ts`, all synthesized with the **Web Audio 
 
 **Verification (fresh dev-inmemory server):** new suite `backend/tests/sound-system.js` **19/19** (S1-S6 static wiring guards + U1-U8 compiled-module units [tone shapes, durations, per-id dedup, 550ms anti-stack gap, cross-tone suppression, legacy back-compat] + L1-L4 live socket feed-throughs); adapted `notification-view-count.js` L3 guard to the new helper name with the SAME locked intent (ID tracking wired + an alert helper called — helper name no longer hardcoded); full battery **307/307 green**; `npm run build` OK (508.73 kB). BUG A/B guards untouched (8/8).
 
+## Provider Home Flicker Fix + Edited-Price Chain Hardening — 2026-08-22
+
+Two live-testing reports on the Provider request list, root-caused jointly (they were the same disease wearing two masks).
+
+### BUG 1 — request cards blinking every 5s poll. ROOT CAUSE
+The **5s background poll** used the same `isLoading['nearbyRequests']` skeleton flag as the manual Refresh button. Every poll: `setLoading(true)` → **skeleton placeholder replaced the whole card list** → cards unmounted → answer returned → cards re-mounted → `animate-slide-up` entrance animation re-triggered on EVERY card. Blinking, in exact lockstep with the 5s interval.
+**Hidden extra damage (this is the real BUG 2):** `RequestCard` holds the edited offer price in local `useState`. Every poll-remount silently **reset the in-progress typed price back to basePrice** — the provider could type 777, a poll lands mid-edit, input snaps back to 500, tap Send → backend receives 500. Every backend/adapter/socket layer was faithfully carrying whatever the UI actually sent — which is why the earlier 550 REST test never caught it (unit tested the pipe, never the tap).
+
+### Fixes (frontend only; zero backend change needed for BUG 1/2)
+1. **Silent polls:** `refreshNearbyRequests({silent})` — background interval passes `{silent:true}`; the skeleton swap only happens on manual refresh / first load. No remount per poll.
+2. **`lib/listReconcile.ts`:** `reconcileNearbyRequests(prev, next)` — identical content ⇒ **identical array reference** (zero re-render at all); otherwise ONLY changed cards get a new object identity (unchanged keep refs → no re-render, no animation restart, **edited input state survives**). Compares only render-visible fields, `distanceKm` included, so live numbers still update smoothly.
+3. **Animate-once per id:** entrance animation gated by `animateIn = !knownRequestIdsRef.has(id)` (reuses the ID-tracking ref from the notification-spam fix) — a card slides in exactly once: the render where its id is first seen; stable `key={r.id}` kept (never index).
+4. **Layout (companion fix):** customer `OfferCard` — price column `shrink-0` own column, stars row `whitespace-nowrap` — rating stars & price clearly visible, no longer pinched together on narrow phones.
+
+### BUG 2 — truth + hardened proof (rule 3)
+Backend chain was proven clean under a live 777 probe: create return ✓ socket `offer.visitingCharge` ✓ adapter `frontend.visitingCharge` ✓ customer GET poll ✓ — **the UI remount was the single divergence point** (item 1 hidden damage). New suite `backend/tests/provider-home-and-price.js` (**13 checks**): S1-S6 static wiring locks (silent gate, reconcile applied, interval silent, stable key+animateIn, VISIBLE_FIELDS, pinch guard), U1-U4 compiled-module units (identical poll → same array ref; new card enters without touching others; distance change re-renders exactly one card; frontend adapter maps visitingCharge straight-through), L1-L3 **live full-chain** on the running backend: edited 777 through REST-return → raw socket payload → adapter payload → customer poll GET → **accept → persisted job**; plus REVIVE path (offer 555 → decline → re-offer 888 same offer id → customer sees 888, never stale 555). Rule-3 gap closed: earlier test only covered REST creation; now every hop incl. UI-cause statics is locked.
+
+**Verification:** full battery **320/320 green** on fresh dev-inmemory (BUG A/B guards untouched); `npm run build` OK (509.29 kB).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -513,6 +532,7 @@ Audio cues in `frontend/src/lib/sound.ts`, all synthesized with the **Web Audio 
 - [x] Returning User Login & Session Persistence: isNewUser/setupComplete contract (backend = single source of truth), googleId>phone linking no duplicates, dual-token refresh + server-side revocation, silent single-flight frontend refresh, partial-setup resume - 288/288 green (2026-08-21)
 - [x] Professional Sound System: 3 distinct Web-Audio tones (general ping / new-request sweep / booking C5-E5-G5 arpeggio), per-id dedup + 550ms anti-stack gap, live feed-through proven - 307/307 green (2026-08-21)
 - [x] Phase 11 deployment PREP: render.yaml blueprint + frontend/vercel.json + frontend/.env.production.example + docs/DEPLOYMENT.md (Atlas->Render->Google OAuth->Vercel->UptimeRobot->smoke); env-readiness verified pre-existing (PORT, CLIENT_URL CORS, MONGO_URI, JWT_SECRET, GOOGLE_CLIENT_ID) - pre-deploy checks 5/5 (2026-08-21)
+- [x] Provider Home flicker fix (silent polls + reconcileNearbyRequests + animate-once-per-id) + edited-price chain hardened live 777/888 incl. revive + OfferCard stars/price pinch fix - 320/320 green (2026-08-22)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

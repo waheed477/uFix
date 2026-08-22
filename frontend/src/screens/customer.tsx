@@ -247,9 +247,9 @@ function OfferCard({ offer, onAccept, onDecline, index, isAccepting }: { offer: 
         <Avatar initials={offer.avatarInitials} color={offer.avatarColor} size={46} online />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5"><span className="truncate font-display text-[15px] font-bold text-ink-900">{offer.providerName}</span><ShieldIcon className="h-4 w-4 shrink-0 text-brand-600" /></div>
-          <div className="mt-0.5 flex items-center gap-1.5"><Stars value={offer.providerRating} size={14} /><span className="text-xs font-semibold text-ink-700">{offer.providerRating}</span><span className="text-xs text-ink-400">({offer.providerReviews})</span></div>
+          <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap"><Stars value={offer.providerRating} size={14} /><span className="text-xs font-semibold text-ink-700">{offer.providerRating}</span><span className="text-xs text-ink-400">({offer.providerReviews})</span></div>
         </div>
-        <div className="text-right"><p className="text-[11px] font-medium text-ink-400">Visiting charge</p><p className="font-display text-2xl font-extrabold text-accent-600">PKR {offer.visitingCharge}</p></div>
+        <div className="shrink-0 pl-2 text-right"><p className="text-[11px] font-medium text-ink-400">Visiting charge</p><p className="font-display text-2xl font-extrabold leading-tight text-accent-600">PKR {offer.visitingCharge}</p></div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><ClockIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">ETA {offer.etaMin} min</span></div>
