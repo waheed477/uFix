@@ -1,0 +1,37 @@
+# uFix Backend — Render blueprint (Phase 11 deployment prep)
+# Apply via: Render Dashboard → New → Blueprint → repo mein ye file detect hoti hai
+# (ya manually "Web Service" bana kar neeche ke values daalein — DEPLOYMENT.md reference)
+
+services:
+  - type: web
+    name: ufix-backend
+    runtime: node
+    plan: free                      # free tier OK; UptimeRobot ping prevents long cold sleeps
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /api/health
+    autoDeploy: false               # deliberate: manual deploys until Phase 11 sign-off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # ---- required (Render dashboard se set karein; values secrets hain) ----
+      - key: MONGO_URI              # MongoDB Atlas connection string (free M0 cluster)
+        sync: false
+      - key: JWT_SECRET             # 32+ char random: `openssl rand -base64 32`
+        sync: false
+      - key: CLIENT_URL             # comma-separated frontend origins, e.g. https://ufix-app.vercel.app
+        sync: false
+      - key: GOOGLE_CLIENT_ID       # Google OAuth Web client (auth.google needs it; without it endpoint fails LOUDLY 500 needsConfig)
+        sync: false
+      # ---- optional ----
+      - key: OTP_EXPIRY_MINUTES
+        value: "5"
+      - key: CLOUDINARY_CLOUD_NAME  # unset => mock upload mode (documented)
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: ADMIN_SECRET
+        sync: false

@@ -512,6 +512,7 @@ Audio cues in `frontend/src/lib/sound.ts`, all synthesized with the **Web Audio 
 - [x] Provider Home real-estate (option a) + notification semantics fix + 'X providers viewing' live count (request:viewCount) - 259/259 green (2026-08-21)
 - [x] Returning User Login & Session Persistence: isNewUser/setupComplete contract (backend = single source of truth), googleId>phone linking no duplicates, dual-token refresh + server-side revocation, silent single-flight frontend refresh, partial-setup resume - 288/288 green (2026-08-21)
 - [x] Professional Sound System: 3 distinct Web-Audio tones (general ping / new-request sweep / booking C5-E5-G5 arpeggio), per-id dedup + 550ms anti-stack gap, live feed-through proven - 307/307 green (2026-08-21)
+- [x] Phase 11 deployment PREP: render.yaml blueprint + frontend/vercel.json + frontend/.env.production.example + docs/DEPLOYMENT.md (Atlas->Render->Google OAuth->Vercel->UptimeRobot->smoke); env-readiness verified pre-existing (PORT, CLIENT_URL CORS, MONGO_URI, JWT_SECRET, GOOGLE_CLIENT_ID) - pre-deploy checks 5/5 (2026-08-21)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 
