@@ -18,6 +18,7 @@ TEST_SUITES=(
   tests/auth-flow.js                       # Auth-issue fix: isNewUser/setupComplete, linking, dual-token refresh/revoke
   tests/sound-system.js                    # Sound system: 3 distinct tones, wiring guards, dedup/anti-stack, live feed-through
   tests/provider-home-and-price.js         # Flicker fix (silent polls+reconcile+per-id animation) + edited-price chain (777/888)
+  tests/offers-visibility-and-card.js      # Zero-offers-before-submit live proof + offer-card layout zone locks
 )
 
 total_pass=0; total_fail=0; failed_suites=()

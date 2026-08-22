@@ -518,6 +518,19 @@ Backend chain was proven clean under a live 777 probe: create return ✓ socket 
 
 **Verification:** full battery **320/320 green** on fresh dev-inmemory (BUG A/B guards untouched); `npm run build` OK (509.29 kB).
 
+## Offer Visibility Timing (verified) + Offer Card Layout Fix — 2026-08-22
+
+### ISSUE 1 — "customer sees an offer only after the provider submits it": VERIFIED CORRECT, no code change needed (honest audit, rule 1 honored)
+Trace + LIVE proof on the running backend: `OffersScreen` offer state starts as `useState<Offer[]>([])`; the only three ways an offer enters it are (a) the initial GET + 2s `pending`-only poll, (b) the `offer:new` socket append for THIS request, (c) the job-offers merge for real offers. No seed/mock/placeholder path exists anywhere. Live: customer posted a request, customer-side socket observed for 2.5s → **zero `offer:new` events, zero offers on GET** (clean "Finding pros…" waiting state — skeleton is card-shaped but is NOT an offer card); the provider then submitted an offer → **exactly ONE** fully-populated `offer:new` (name/rating/reviews/visitingCharge/eta all present) and exactly ONE pending offer on GET, stable id across repeat polls. Movement-before-submission is impossible at the data layer.
+
+### ISSUE 2 — rating stars crowding/overlapping the price on offer cards (mobile 375-390px): FIXED (layout-only)
+Where it pinched: the **AvailableProvidersScreen provider card** (stars sat inline with category·city text, price column had no shrink guard) — same disease as the earlier partial OfferCard fix. Consistent 3-zone discipline now on BOTH customer-side cards and the locked provider-side one:
+- Zone A: avatar fixed; Zone B: `min-w-0 flex-1` middle with `overflow-hidden` clip, provider name truncates, stars block `shrink-0 nowrap`, rating number `shrink-0`, review-count/city `truncate` — so Zone B NEVER invades the price; Zone C: price `shrink-0 max-w-[44%]` own column.
+- Verified-structure locks cover edge Cases: long provider name ("Muhammad Abdullah Khan Sherwani"), 5-digit PKR 12500, 5★ + (reviews) — no zone can collide.
+- `MyOfferCard` (provider's own offers list) already had `shrink-0` price + `line-clamp-1` description — a guard now LOCKS it stays that way (pure layout; zero props/data touched anywhere; same colors/rounded/shadow as before).
+
+**Verification:** new suite `backend/tests/offers-visibility-and-card.js` **9/9** (S1-S5 static honesty+zone locks incl. cross-reuse; L1-L4 live: pre-submission zero-everything, post-submission exactly-one-fully-populated card, stable id); the earlier price suite's layout guard regexes were intentionally re-pointed to the new structure (same locked intent, stronger); full battery **329/329 green** on fresh server; ""`npm run build` OK (509.61 kB).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -533,6 +546,7 @@ Backend chain was proven clean under a live 777 probe: create return ✓ socket 
 - [x] Professional Sound System: 3 distinct Web-Audio tones (general ping / new-request sweep / booking C5-E5-G5 arpeggio), per-id dedup + 550ms anti-stack gap, live feed-through proven - 307/307 green (2026-08-21)
 - [x] Phase 11 deployment PREP: render.yaml blueprint + frontend/vercel.json + frontend/.env.production.example + docs/DEPLOYMENT.md (Atlas->Render->Google OAuth->Vercel->UptimeRobot->smoke); env-readiness verified pre-existing (PORT, CLIENT_URL CORS, MONGO_URI, JWT_SECRET, GOOGLE_CLIENT_ID) - pre-deploy checks 5/5 (2026-08-21)
 - [x] Provider Home flicker fix (silent polls + reconcileNearbyRequests + animate-once-per-id) + edited-price chain hardened live 777/888 incl. revive + OfferCard stars/price pinch fix - 320/320 green (2026-08-22)
+- [x] Offer visibility timing VERIFIED (zero cards pre-submission, exactly one full card post) + offer/provider card layout zone fix (stars vs price, consistent across reuse) - 329/329 green (2026-08-22)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

@@ -57,8 +57,8 @@ async function waitFor(fn, timeout = 8000, step = 150) {
     /cn\(animateIn && "animate-slide-up"/.test(prov));
   check('S5 listReconcile helper: explicit VISIBLE_FIELDS incl. distanceKm (numbers still update) + prev-ref reuse branch',
     /VISIBLE_FIELDS/.test(rec) && /distanceKm/.test(rec) && /prevById/.test(rec) && /return prev/.test(rec));
-  check('S6 OfferCard layout pinch guard: price column cannot squeeze name+stars (shrink-0 own column, nowrap stars row)',
-    /shrink-0 pl-2 text-right/.test(cust) && /flex items-center gap-1\.5 whitespace-nowrap"><Stars/.test(cust));
+  check('S6 OfferCard layout pinch guard: price column cannot squeeze name+stars (shrink-0 + max-w-[44%] own column, nowrap stars row)',
+    /shrink-0 max-w-\[44%\] pl-2 text-right/.test(cust) && /flex items-center gap-1\.5 overflow-hidden whitespace-nowrap/.test(cust));
 
   console.log('\n=== UNIT — compiled listReconcile + frontend adapters (esbuild, real modules) ===');
   const build = (src, out) => cp.execSync(`${path.join(__dirname, '../../frontend/node_modules/.bin/esbuild')} ${src} --format=esm --bundle --outfile=${out}`, { stdio: 'pipe' });
