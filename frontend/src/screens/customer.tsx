@@ -10,7 +10,7 @@ import { MapView, type MapMarker } from "@/components/MapView";
 import { GoogleMapView } from "@/components/GoogleMap";
 import { NotificationBell } from "@/components/notifications";
 import { PlaceSearch } from "@/components/PlaceSearch";
-import { DEFAULT_COORDS, offsetToCoords, reverseGeocode, isGoogleMapsAvailable } from "@/lib/location";
+import { DEFAULT_COORDS, offsetToCoords, reverseGeocode, isGoogleMapsAvailable, estimateTravelMinutes } from "@/lib/location";
 import {
   Avatar,
   BanknoteIcon,
@@ -27,6 +27,7 @@ import {
   ShieldIcon,
   Skeleton,
   Stars,
+  DistanceDisplay,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { adaptBackendOfferToFrontendOffer } from "@/lib/adapters";
@@ -240,20 +241,23 @@ export function NewRequest() {
   );
 }
 
-function OfferCard({ offer, onAccept, onDecline, index, isAccepting }: { offer: Offer; onAccept: () => void; onDecline: () => void; index: number; isAccepting?: boolean; }) {
+function OfferCard({ offer, onAccept, onDecline, index, isAccepting, isClosest }: { offer: Offer; onAccept: () => void; onDecline: () => void; index: number; isAccepting?: boolean; isClosest?: boolean; }) {
   return (
     <div className="animate-slide-in-right rounded-2xl bg-white p-4 shadow-card" style={{ animationDelay: `${index * 60}ms` }}>
       <div className="flex items-center gap-3">
         <Avatar initials={offer.avatarInitials} color={offer.avatarColor} size={46} online />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5"><span className="truncate font-display text-[15px] font-bold text-ink-900">{offer.providerName}</span><ShieldIcon className="h-4 w-4 shrink-0 text-brand-600" /></div>
+          <div className="flex items-center gap-1.5"><span className="truncate font-display text-[15px] font-bold text-ink-900">{offer.providerName}</span><ShieldIcon className="h-4 w-4 shrink-0 text-brand-600" />{isClosest && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">⚡ Closest</span>}</div>
           <div className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap"><span className="shrink-0"><Stars value={offer.providerRating} size={14} /></span><span className="shrink-0 text-xs font-semibold text-ink-700">{offer.providerRating}</span><span className="min-w-0 truncate text-xs text-ink-400">({offer.providerReviews})</span></div>
+          {/* SNAPSHOT distance captured at offer-creation (backend Haversine; provider's precise
+              coords never reach the customer pre-acceptance). ~time = 18 km/h urban assumption. */}
+          <div className="mt-0.5 overflow-hidden whitespace-nowrap text-xs"><DistanceDisplay km={offer.distanceKm} size={12} /></div>
         </div>
         <div className="shrink-0 max-w-[44%] pl-2 text-right"><p className="text-[11px] font-medium text-ink-400">Visiting charge</p><p className="font-display text-2xl font-extrabold leading-tight text-accent-600">PKR {offer.visitingCharge}</p></div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><ClockIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">ETA {offer.etaMin} min</span></div>
-        <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><NavigateIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">{offer.distanceKm} km</span></div>
+        <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><NavigateIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">{offer.distanceKm.toFixed(1)} km · ~{estimateTravelMinutes(offer.distanceKm)} min</span></div>
       </div>
       <div className="mt-3 flex gap-2">
         <Button size="sm" className="flex-1" onClick={onAccept} disabled={isAccepting}>{isAccepting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : "Accept & unlock contact"}</Button>
@@ -288,7 +292,9 @@ function ViewingPill({ requestId, category }: { requestId?: string | null; categ
 
 export function OffersScreen() {
   const { back, jobs, activeRequestId, acceptOffer, declineOffer, cancelRequest, isLoading, location, navigate } = useApp();
-  const [sort, setSort] = useState<"price" | "eta">("price");
+  // Distance UX (2026-08-23): 3-way sort. Default NEWEST (arrival order was the prior product
+  // default); Nearest uses the snapshot distance captured at offer-creation.
+  const [sort, setSort] = useState<"newest" | "price" | "distance">("newest");
   const [offers, setOffers] = useState<Offer[]>([]);
   const [loadingOffers, setLoadingOffers] = useState(true);
   const [elapsed, setElapsed] = useState(false);
@@ -376,7 +382,16 @@ export function OffersScreen() {
     );
   }
 
-  const sortedOffers = [...offers].sort((a, b) => (sort === "price" ? a.visitingCharge - b.visitingCharge : a.etaMin - b.etaMin));
+  const sortedOffers = [...offers].sort((a, b) =>
+    sort === "price" ? a.visitingCharge - b.visitingCharge
+    : sort === "distance" ? a.distanceKm - b.distanceKm
+    : b.timestamp - a.timestamp // newest first
+  );
+  // "Closest" badge (Distance UX Task 3): only when >1 offer; single lowest snapshot distance;
+  // recomputes automatically with any offers/sort change (derived from current offer list).
+  const closestOfferId = sortedOffers.length > 1
+    ? sortedOffers.reduce((min, o) => (o.distanceKm < min.distanceKm ? o : min), sortedOffers[0]).id
+    : null;
   const meta = categoryById(request.category);
   const isAccepting = isLoading['acceptOffer'];
 
@@ -399,9 +414,9 @@ export function OffersScreen() {
       {sortedOffers.length > 0 && (
         <div className="flex items-center gap-2 px-4 pt-3">
           <span className="text-xs font-medium text-ink-500">Sort by</span>
-          <div className="flex rounded-full bg-ink-100 p-0.5">
-            {(["price", "eta"] as const).map((s) => (
-              <button key={s} onClick={() => setSort(s)} className={cn("rounded-full px-3 py-1 text-xs font-semibold", sort === s ? "bg-white text-ink-900 shadow-sm" : "text-ink-500")}>{s === "price" ? "Lowest charge" : "Fastest"}</button>
+          <div className="no-scrollbar flex overflow-x-auto rounded-full bg-ink-100 p-0.5">
+            {(["newest", "distance", "price"] as const).map((s) => (
+              <button key={s} onClick={() => setSort(s)} className={cn("shrink-0 rounded-full px-3 py-1 text-xs font-semibold", sort === s ? "bg-white text-ink-900 shadow-sm" : "text-ink-500")}>{s === "newest" ? "Newest first" : s === "distance" ? "Nearest first" : "Cheapest first"}</button>
             ))}
           </div>
         </div>
@@ -416,7 +431,7 @@ export function OffersScreen() {
           elapsed ? <EmptyState icon={<ClockIcon className="h-9 w-9" />} title={`No offers yet in ${location.city}`} subtitle={`${location.city} pros are being notified. Offers will appear live within 2 seconds.`} /> :
           <div className="flex items-center justify-center gap-2.5 py-4"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand-600" /></span><span className="text-sm font-semibold text-ink-600">Finding {meta.plural.toLowerCase()} in {location.city}…</span></div>
         ) : (
-          <div className="space-y-3">{sortedOffers.map((o,i)=><OfferCard key={o.id} offer={o} index={i} isAccepting={isAccepting} onAccept={()=>acceptOffer(request.id,o)} onDecline={()=>{ setOffers(prev=>prev.filter(x=>x.id!==o.id)); declineOffer(request.id,o.id); }} />)}</div>
+          <div className="space-y-3">{sortedOffers.map((o,i)=><OfferCard key={o.id} offer={o} index={i} isAccepting={isAccepting} isClosest={o.id===closestOfferId} onAccept={()=>acceptOffer(request.id,o)} onDecline={()=>{ setOffers(prev=>prev.filter(x=>x.id!==o.id)); declineOffer(request.id,o.id); }} />)}</div>
         )}
       </div>
       <div className="border-t border-ink-100 bg-white px-4 py-3">

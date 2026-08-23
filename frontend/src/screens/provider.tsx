@@ -30,6 +30,7 @@ import {
   SendIcon,
   Stars,
   timeAgo,
+  DistanceDisplay,
 } from "@/components/ui";
 
 function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
@@ -47,6 +48,15 @@ function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
       </span>
     </button>
   );
+}
+
+/* Extract a request's real coordinates (shared by the card's live Haversine + the list's
+ * nearest-first sorter). */
+function requestCoords(req: any): { lat: number; lng: number } | null {
+  const reqGeo = req?._geoLocation || req?._backend?.location || req?._backend?.geoLocation || req?.location;
+  if (reqGeo?.coordinates) return { lng: reqGeo.coordinates[0], lat: reqGeo.coordinates[1] };
+  if (reqGeo?.lat && reqGeo?.lng) return { lat: reqGeo.lat, lng: reqGeo.lng };
+  return null;
 }
 
 function RequestCard({ 
@@ -79,26 +89,10 @@ function RequestCard({
   // Live distance calculation reading both live locations
   const liveDistance = useMemo(() => {
     if (!providerCoords) return req.distanceKm;
-    // Request coords from _geoLocation or _backend location
-    const reqGeo = (req as any)._geoLocation || (req as any)._backend?.location || (req as any)._backend?.geoLocation;
-    let reqLat = 31.5204, reqLng = 74.3587; // fallback Lahore
-    if (reqGeo) {
-      if (reqGeo.coordinates) {
-        reqLng = reqGeo.coordinates[0];
-        reqLat = reqGeo.coordinates[1];
-      } else if (reqGeo.lat && reqGeo.lng) {
-        reqLat = reqGeo.lat;
-        reqLng = reqGeo.lng;
-      } else if ((req as any).location && (req as any).location.coordinates) {
-        reqLng = (req as any).location.coordinates[0];
-        reqLat = (req as any).location.coordinates[1];
-      }
-    } else if ((req as any)._backend?.location?.coordinates) {
-      reqLng = (req as any)._backend.location.coordinates[0];
-      reqLat = (req as any)._backend.location.coordinates[1];
-    }
+    const rc = requestCoords(req);
+    if (!rc) return req.distanceKm;
     try {
-      const dist = calculateDistanceKm(providerCoords.lat, providerCoords.lng, reqLat, reqLng);
+      const dist = calculateDistanceKm(providerCoords.lat, providerCoords.lng, rc.lat, rc.lng);
       return Math.round(dist * 10) / 10; // 1 decimal for precision
     } catch {
       return req.distanceKm;
@@ -137,13 +131,11 @@ function RequestCard({
               <ClockIcon className="h-3.5 w-3.5" /> {timeAgo(req.createdAt)}
             </span>
           </div>
-          <div className="mt-1 flex items-center gap-1.5 text-xs">
-            <span className="font-semibold" style={{ color: meta.color }}>{meta.label}</span>
-            <span className="text-ink-300">·</span>
-            <span className={cn("font-medium", liveDistance < 2 ? "text-emerald-600" : liveDistance < 5 ? "text-amber-600" : "text-ink-500")}>
-              {liveDistance} km away • Live
-            </span>
-            {isUrgent && <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Expiring soon</span>}
+          <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+            <span className="shrink-0 font-semibold" style={{ color: meta.color }}>{meta.label}</span>
+            <span className="shrink-0 text-ink-300">·</span>
+            <DistanceDisplay km={liveDistance} live />
+            {isUrgent && <span className="ml-1 shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Expiring soon</span>}
           </div>
         </div>
       </div>
@@ -156,15 +148,14 @@ function RequestCard({
         <MapPinIcon className="h-4 w-4 shrink-0 text-brand-600 mt-0.5" />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold text-brand-800">📍 {areaName}</p>
-          <p className="mt-0.5 text-[11px] text-brand-600">Customer location • {req.distanceKm} km (static) • {liveDistance} km (live) • { (req as any).city || (req as any)._backend?.city || "Same city"}</p>
+          <p className="mt-0.5 text-[11px] text-brand-600">Customer location • { (req as any).city || (req as any)._backend?.city || "Same city"}</p>
         </div>
       </div>
 
-      {/* Live Distance Details - Both Live Locations Reading */}
+      {/* Distance (consistent live pattern) + Area */}
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2">
-          <div className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-          <span className="text-xs font-semibold text-ink-700">Live: {liveDistance} km</span>
+        <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2 text-xs">
+          <DistanceDisplay km={liveDistance} live size={12} />
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2">
           <MapPinIcon className="h-3.5 w-3.5 text-ink-400" />
@@ -261,6 +252,20 @@ export function ProviderHome() {
   const watchIdRef = useRef<number | null>(null);
 
   const earnings = jobs.filter((j) => j.status === "completed").reduce((sum, j) => sum + (Number((j.fee ?? "").replace(/[^0-9]/g, "")) || 0), 0);
+
+  // Distance UX (2026-08-23): provider list defaults to NEAREST FIRST, using the same live
+  // Haversine the cards show (falls back to the request's snapshot distanceKm). No backend
+  // change - client-side ordering of already-fetched data, per task scope.
+  const sortedRequests = useMemo(() => {
+    const dist = (r: any) => {
+      if (liveCoords) {
+        const rc = requestCoords(r);
+        if (rc) { try { return calculateDistanceKm(liveCoords.lat, liveCoords.lng, rc.lat, rc.lng); } catch {} }
+      }
+      return Number(r.distanceKm ?? 9999);
+    };
+    return [...nearbyRequests].sort((a, b) => dist(a) - dist(b));
+  }, [nearbyRequests, liveCoords]);
 
   // Live location tracking for provider - updates distance live on cards
   useEffect(() => {
@@ -442,7 +447,7 @@ export function ProviderHome() {
           </div>
         ) : (
           <div className="space-y-3">
-            {nearbyRequests.map((r) => (
+            {sortedRequests.map((r) => (
               <RequestCard
                 key={r.id}
                 req={r}

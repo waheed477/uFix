@@ -5,6 +5,7 @@ const User = require('../models/User');
 const Job = require('../models/Job');
 const { createNotification } = require('../utils/notify');
 const { expireRequestIfStale } = require('../utils/requestExpiry');
+const { calculateDistanceKm } = require('../utils/geo');
 
 /**
  * Offer Controller - Phase 4 Core Business Logic
@@ -163,6 +164,18 @@ const createOffer = async (req, res) => {
       });
     }
 
+    // Distance UX (2026-08-23): SNAPSHOT km provider<->request at offer-creation time via the
+    // shared Haversine. Served to the customer as a plain number (privacy-safe - provider's
+    // precise coords are never exposed pre-acceptance, only the derived distance).
+    let offerDistanceKm;
+    try {
+      const pc = provider.location?.coordinates;
+      const rc = request.location?.coordinates;
+      if (pc && rc && pc[0] !== undefined && rc[0] !== undefined) {
+        offerDistanceKm = Math.round(calculateDistanceKm(pc[1], pc[0], rc[1], rc[0]) * 10) / 10; // 1 decimal
+      }
+    } catch {}
+
     // Check duplicate offer (compound index also enforces, but check for clear message)
     // Bidirectional Sync pass: if provider's previous offer was REJECTED (customer declined it,
     // or request was closed/re-opened), allow them to RE-OFFER with a new price/ETA by reviving
@@ -185,6 +198,7 @@ const createOffer = async (req, res) => {
       existingOffer.etaMinutes = eta;
       existingOffer.status = 'pending';
       existingOffer.createdAt = new Date(); // bump so it sorts as newest for the customer
+      existingOffer.distanceKm = offerDistanceKm; // refresh the snapshot with the revive
       await existingOffer.save();
       revivedExistingOffer = true;
       if (process.env.NODE_ENV !== 'production') {
@@ -198,7 +212,8 @@ const createOffer = async (req, res) => {
       provider: req.user.id,
       visitingCharge: charge,
       etaMinutes: eta,
-      status: 'pending'
+      status: 'pending',
+      distanceKm: offerDistanceKm
     });
 
     if (!revivedExistingOffer) {
@@ -225,7 +240,7 @@ const createOffer = async (req, res) => {
         const { adaptOfferForFrontend } = require('../utils/responseAdapters');
         let adaptedOffer;
         try {
-          adaptedOffer = adaptOfferForFrontend(offer, { category: request.category });
+          adaptedOffer = adaptOfferForFrontend(offer, { category: request.category, ...(offerDistanceKm !== undefined ? { distanceKm: offerDistanceKm } : {}) });
         } catch (adaptErr) {
           console.warn('adaptOfferForFrontend failed, using fallback:', adaptErr.message);
           adaptedOffer = {
@@ -239,7 +254,7 @@ const createOffer = async (req, res) => {
             category: request.category,
             visitingCharge: offer.visitingCharge,
             etaMin: offer.etaMinutes,
-            distanceKm: 1.5,
+            distanceKm: offerDistanceKm ?? 1.5,
             timestamp: Date.now()
           };
         }
@@ -263,6 +278,7 @@ const createOffer = async (req, res) => {
             visitingCharge: offer.visitingCharge,
             etaMinutes: offer.etaMinutes,
             status: offer.status,
+            distanceKm: offer.distanceKm ?? null,
             createdAt: offer.createdAt
           },
           frontend: adaptedOffer,
@@ -373,6 +389,7 @@ const getOffersForRequest = async (req, res) => {
         visitingCharge: o.visitingCharge,
         etaMinutes: o.etaMinutes,
         status: o.status,
+        distanceKm: o.distanceKm ?? null,
         createdAt: o.createdAt
       }))
     });

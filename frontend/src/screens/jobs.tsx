@@ -32,6 +32,7 @@ import {
   StatusBadge,
   clock as fmtClock,
   timeAgo,
+  DistanceDisplay,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { adaptBackendJobToFrontendJob } from "@/lib/adapters";
@@ -181,8 +182,8 @@ export function ActiveJobScreen() {
                 {isCustomer ? "Pro is on the way - Live" : "Heading to customer - Live"}
               </div>
               {liveDistance !== null && (
-                <div className="rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white shadow-soft">
-                  📍 Live: {liveDistance} km away
+                <div className="rounded-full bg-white/95 px-3 py-1.5 text-xs shadow-soft">
+                  <DistanceDisplay km={liveDistance} live />
                 </div>
               )}
             </div>
@@ -207,7 +208,7 @@ export function ActiveJobScreen() {
                   <span>{meta.label}</span>
                   {peerRating && <><span className="text-ink-300">·</span><Stars value={peerRating} size={13} /><span className="font-semibold text-ink-700">{peerRating}</span></>}
                 </div>
-                {liveDistance !== null && <p className="mt-1 text-xs font-medium text-emerald-600">📡 Live distance: {liveDistance} km • Both live locations</p>}
+                {liveDistance !== null && <p className="mt-1 text-xs"><DistanceDisplay km={liveDistance} live size={12} /></p>}
               </div>
             </div>
 

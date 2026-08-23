@@ -3,6 +3,7 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 import { cn } from "@/utils/cn";
 import type { Category, JobStatus } from "@/lib/types";
 import { categoryById, STATUS } from "@/lib/types";
+import { estimateTravelMinutes } from "@/lib/location";
 
 /* ============================================================
    SVG ICONS  (custom, consistent stroke style)
@@ -419,6 +420,38 @@ export function EmptyState({
 /* ============================================================
    HELPERS
    ============================================================ */
+/* ============================================================
+   DISTANCE DISPLAY (2026-08-23 Distance UX pass)
+   ONE consistent, prominent pattern across: provider incoming request cards,
+   customer offer cards, and the Active Job live-tracking display.
+   Renders: pin icon + "{km} km" (1 decimal) + "~{min} min away" (estimateTravelMinutes,
+   18 km/h urban assumption) + optional tiny "live" pulse qualifier.
+   ============================================================ */
+export function DistanceDisplay({
+  km,
+  live = false,
+  size = 13,
+  className,
+}: {
+  km: number | null | undefined;
+  live?: boolean;
+  size?: number;
+  className?: string;
+}) {
+  if (km === null || km === undefined || !isFinite(km)) return null;
+  const rounded = Math.round(km * 10) / 10;
+  const mins = estimateTravelMinutes(rounded);
+  const iconCls = size <= 11 ? "h-3 w-3" : size <= 13 ? "h-3.5 w-3.5" : "h-4 w-4"; // icons take className only
+  return (
+    <span className={cn("inline-flex min-w-0 items-center gap-1", className)}>
+      {live && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" />}
+      <MapPinIcon className={cn("shrink-0 text-brand-600", iconCls)} />
+      <span className="shrink-0 font-bold text-ink-800">{rounded.toFixed(1)} km</span>
+      <span className="shrink-0 font-medium text-ink-400">· ~{mins} min away{live ? " · live" : ""}</span>
+    </span>
+  );
+}
+
 
 export function timeAgo(ts: number): string {
   const s = Math.floor((Date.now() - ts) / 1000);

@@ -38,6 +38,13 @@ const offerSchema = new mongoose.Schema({
     min: [1, 'ETA must be at least 1 minute'],
     max: [1440, 'ETA cannot exceed 24 hours (1440 minutes)']
   },
+  // 2026-08-23 (distance UX pass): SNAPSHOT km between provider and request, computed at
+  // offer-creation time via the shared Haversine (utils/geo.calculateDistanceKm). Optional
+  // (old offers may lack it); NOT live - refreshing it needs the live GPS system instead.
+  distanceKm: {
+    type: Number,
+    min: 0
+  },
   status: {
     type: String,
     enum: {

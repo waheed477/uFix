@@ -316,6 +316,19 @@ export function calculateDistanceKm(lat1: number, lng1: number, lat2: number, ln
   return R * c;
 }
 
+/* Travel-time estimate from a distance (Distance UX pass 2026-08-23).
+ * ASSUMPTION: 18 km/h average for local urban travel in Pakistani cities (mid of the
+ * task-specified 15-20 km/h band; accounts for typical stop-start traffic without
+ * claiming traffic awareness). minutes = km * (60/18) = km * 3.33, rounded UP so we
+ * never promise faster-than likely, floor 2 min (a 300m trip is still "a couple of
+ * minutes"), display cap 999. Shared by ALL distance displays - one assumption, one place. */
+export function estimateTravelMinutes(km: number): number {
+  if (!isFinite(km) || km < 0) return 0;
+  if (km === 0) return 1;
+  const minutes = Math.max(2, Math.ceil(km * (60 / 18)));
+  return Math.min(999, minutes);
+}
+
 function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }

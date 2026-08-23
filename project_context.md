@@ -554,6 +554,27 @@ All in `frontend/src/lib/sound.ts`, 100% Web Audio API (no files/dependencies). 
 `frontend/src/components/SoundPreview.tsx` (`SoundPreviewScreen`, screen id `soundPreview`) — tap each candidate to A/B listen; ★ marks wired default. Reachable from **Profile tab → 🎧 Sound Preview (DEV)** button, rendered ONLY when `import.meta.env.DEV` — **remove panel + button + screen id before final production deployment**.
 **Verification:** sound-system.js **21/21** (S1-S7 static incl. candidate exports + delegate locks; U1-U9 compiled-module units incl. exact frequencies/sweeps/spans for ALL six candidates + dedup/gap intact; L1-L4 live feed-through); no-premature-offer.js 8/8; full battery **339/339 green**; `npm run build` OK (510.39 kB).
 
+## Distance UX: consistent prominent display + sort + Closest badge — 2026-08-23
+
+### Current trace (before) -> inconsistency found
+Provider request card showed live km (good, but cluttered: redundant static+live dupes in the area box + a 3rd "Live: X km" chip), Customer OfferCard showed a small "{distanceKm} km" chip whose value was a FAKE hardcoded 1.5 (no real distance existed on offers), ActiveJob showed ad-hoc pills ("📍 Live: X km"). Now ONE pattern everywhere.
+
+### ONE shared pattern (Task 1)
+`DistanceDisplay` (`frontend/src/components/ui.tsx`): pin icon + **"X.X km"** (1 decimal, bold, price-comparable emphasis) + "**~N min away**", optional emerald pulse + "live" qualifier.
+- Provider incoming request card: **LIVE** (existing GPS watchPosition + shared Haversine `calculateDistanceKm` — calc NOT rebuilt). Redundant static/live dupes in the area box removed; the card shows the same component twice (header meta row + detail chip) with no contradictory numbers.
+- ActiveJob screen: **LIVE** (existing both-live-locations tracking; map overlay pill + peer card line now use the same component).
+- Customer offer card: **SNAPSHOT at offer-creation time** (documented decision): live provider tracking is not subscribed on the customer's offers screen, and live-wiring it pre-acceptance would leak providers' precise locations. Instead the BACKEND now computes provider↔request Haversine at POST /offers (shared `utils/geo.calculateDistanceKm`), stores `distanceKm` (optional field, Offer schema) on the document, refreshes it on revive, and serves it via GET offers + `offer:new` payload (both raw + adapted layers). Privacy-safe: customer receives only the derived km, never provider coords. This also REPLACED the previous fake 1.5 fallback for new offers; old offers without the field still fall back acceptably.
+
+### ETA assumption (Task 1.2) — documented, one place
+`estimateTravelMinutes(km)` in `lib/location.ts`: **18 km/h average local urban travel** (middle of the task's 15-20 km/h band, stop-start Pakistani city traffic), ceil, floor 2 min, cap 999. Deliberately NOT traffic-aware.
+
+### Sort + badge (Tasks 2-3)
+- Customer Offers screen: 3-way client-side sort — **Newest first (default, prior behavior)** / **Nearest first** / **Cheapest first** (`sortedOffers` switch; no backend endpoint added).
+- Provider incoming list: no toggle (per task judgment) — default **nearest-first** ordering via a small client-side `sortedRequests` memo using the same shared Haversine + live coords.
+- "⚡ Closest" badge (amber pill matching the existing "Expiring soon" badge language) on the single lowest-distance offer, only when >1 offer exists; derived via reduce (recomputes automatically on any offers/sort change, never stored state).
+
+**Verification:** new suite `backend/tests/distance-ux.js` **12/12** (S1-S6 static locks incl. schema/controller snapshot + pattern presence on all 3 surfaces + sort/badge wiring; U1 compiled-module ETA math table; L1-L5 live: two providers at ~1.4km/~7.1km → exact snapshot km per offer via GET AND socket path, persistence across polls, > near < far); full battery **351/351 green** on fresh server; `npm run build` OK (511.54 kB).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -571,6 +592,7 @@ All in `frontend/src/lib/sound.ts`, 100% Web Audio API (no files/dependencies). 
 - [x] Provider Home flicker fix (silent polls + reconcileNearbyRequests + animate-once-per-id) + edited-price chain hardened live 777/888 incl. revive + OfferCard stars/price pinch fix - 320/320 green (2026-08-22)
 - [x] Offer visibility timing VERIFIED (zero cards pre-submission, exactly one full card post) + offer/provider card layout zone fix (stars vs price, consistent across reuse) - 329/329 green (2026-08-22)
 - [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
+- [x] Distance UX: one shared DistanceDisplay (pin + X.X km + ~N min, 18 km/h ETA assumption), live on provider cards/ActiveJob, accurate backend-computed SNAPSHOT on offer cards (privacy-safe), offers sort Newest/Nearest/Cheapest + provider nearest-first default + ⚡ Closest badge - 351/351 green (2026-08-23)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 
