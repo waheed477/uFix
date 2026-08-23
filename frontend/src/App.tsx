@@ -7,6 +7,7 @@ import { ProviderHome } from "@/screens/provider";
 import { ActiveJobScreen, ChatScreen, HistoryScreen, JobsTab, RatingScreen } from "@/screens/jobs";
 import { EditProfileScreen, ProfileTab } from "@/screens/profile";
 import { LocationPermissionScreen } from "@/screens/location";
+import { SoundPreviewScreen } from "@/components/SoundPreview";
 import { BottomNav } from "@/components/BottomNav";
 import {
   Avatar,
@@ -169,6 +170,8 @@ function AppShell() {
         return <HistoryScreen />;
       case "editProfile":
         return <EditProfileScreen />;
+      case "soundPreview":
+        return <SoundPreviewScreen />;
       default:
         return null;
     }

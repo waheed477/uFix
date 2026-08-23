@@ -531,6 +531,29 @@ Where it pinched: the **AvailableProvidersScreen provider card** (stars sat inli
 
 **Verification:** new suite `backend/tests/offers-visibility-and-card.js` **9/9** (S1-S5 static honesty+zone locks incl. cross-reuse; L1-L4 live: pre-submission zero-everything, post-submission exactly-one-fully-populated card, stable id); the earlier price suite's layout guard regexes were intentionally re-pointed to the new structure (same locked intent, stronger); full battery **329/329 green** on fresh server; ""`npm run build` OK (509.61 kB).
 
+## Issue 1 FIX (confirmed bug): premature offer card after posting + Issue 2: sound tone redesign — 2026-08-23
+
+### ISSUE 1 — "Customer sees an offer before provider sends it": ROOT CAUSE + FIX
+**Controlled live trace (before fixing):** POST /api/requests → GET /api/requests/:id/offers returned EMPTY immediately AND after 2.5s; customer socket received ZERO `offer:new` (only `request:viewCount`, a non-offer event). Backend is CLEAN — no auto-created Offer. The premature card came from the FRONTEND: `postRequest` did `setStack(['availableProviders'])`, instantly landing the customer on the AvailableProviders listing, whose cards (avatar + stars + "PKR <defaultVisitingCharge from provider PROFILE>" + Book Now) are visually identical to offer cards — a price the provider never sent for this request. (Live proof of the mechanism: providers/available returned 1 provider with price 500 while offers were empty.)
+**Fix (precise, one behavior only):** `postRequest` now navigates to the **'offers'** waiting screen — zero cards, live viewing pill, until a provider explicitly POSTs an offer. The providers listing stays reachable only by EXPLICIT user choice (Jobs tab "Providers" button). No backend change, no Offer-model change, no other navigation touched.
+**Regression lock:** new suite `backend/tests/no-premature-offer.js` **8/8** (S1-S3 static: nav target + no auto-route to priced listing + empty-init guarantee; L1-L4 live: immediate empty GET, 2.5s silence incl. no offer:new, then exactly ONE fully-populated offer after provider POST, stable id).
+
+### ISSUE 2 — Sound tones redesigned (previous attempt rejected): MULTIPLE candidates per category
+All in `frontend/src/lib/sound.ts`, 100% Web Audio API (no files/dependencies). Existing dedup (`claimAudible` TTL keys) + anti-stack gap (`MIN_TONE_GAP_MS = 550`) **unchanged** — only tone generation changed.
+
+| Category | Candidate A | Candidate B | WIRED DEFAULT |
+|---|---|---|---|
+| General notification (offer/chat/status/decline/rating) | `playNotificationA()` — soft two-note ding-dong chime rise G5→B5, ~230ms | `playNotificationB()` — soft pop/bubble, quick upward pitch bend 520→900Hz, ~170ms | **B** (previous rejected tone was a two-note chime — candidate A's family — so default picks the other character) |
+| New-request alert (provider) | `playNewRequestA()` — 3-note ascending run C5-E5-G5, triangle, ~0.45s + haptic | `playNewRequestB()` — double-knock D6 twice, 150ms apart, ~0.35s + haptic | **A** (bright, clearly more attention-getting than the general pop; replaces rejected downward sweep) |
+| Booking/accept confirmation | `playBookingConfirmedA()` — major arpeggio C5-E5-G5-C6, warm sine, ~570ms + haptic | `playBookingConfirmedB()` — swoosh-to-chime: 360→880Hz sweep resolving to a held tone + soft octave shimmer, ~600ms + haptic | **B** (previous rejected default was a C-E-G arpeggio — candidate A's family — so default picks the swoosh) |
+
+**To swap a default:** edit the single marked line (`<-- WIRED DEFAULT`) inside `playNotificationTone` / `playNewRequestTone` / `playBookingConfirmedTone` in lib/sound.ts — dedup keys, gap and all call sites follow automatically.
+**Call-site wiring unchanged:** general via persisted `notification:new` (offer_accepted/request_new excluded); new-request via `request:new` socket + poll sentinel (id-deduped); booking at BOTH accept paths (action success + `offer:accepted`, offerId-deduped).
+
+### Sound Preview panel — TEMPORARY, DEV-ONLY
+`frontend/src/components/SoundPreview.tsx` (`SoundPreviewScreen`, screen id `soundPreview`) — tap each candidate to A/B listen; ★ marks wired default. Reachable from **Profile tab → 🎧 Sound Preview (DEV)** button, rendered ONLY when `import.meta.env.DEV` — **remove panel + button + screen id before final production deployment**.
+**Verification:** sound-system.js **21/21** (S1-S7 static incl. candidate exports + delegate locks; U1-U9 compiled-module units incl. exact frequencies/sweeps/spans for ALL six candidates + dedup/gap intact; L1-L4 live feed-through); no-premature-offer.js 8/8; full battery **339/339 green**; `npm run build` OK (510.39 kB).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -547,6 +570,7 @@ Where it pinched: the **AvailableProvidersScreen provider card** (stars sat inli
 - [x] Phase 11 deployment PREP: render.yaml blueprint + frontend/vercel.json + frontend/.env.production.example + docs/DEPLOYMENT.md (Atlas->Render->Google OAuth->Vercel->UptimeRobot->smoke); env-readiness verified pre-existing (PORT, CLIENT_URL CORS, MONGO_URI, JWT_SECRET, GOOGLE_CLIENT_ID) - pre-deploy checks 5/5 (2026-08-21)
 - [x] Provider Home flicker fix (silent polls + reconcileNearbyRequests + animate-once-per-id) + edited-price chain hardened live 777/888 incl. revive + OfferCard stars/price pinch fix - 320/320 green (2026-08-22)
 - [x] Offer visibility timing VERIFIED (zero cards pre-submission, exactly one full card post) + offer/provider card layout zone fix (stars vs price, consistent across reuse) - 329/329 green (2026-08-22)
+- [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

@@ -1,5 +1,8 @@
 /**
- * Sound System suite (2026-08-21) — distinct professional tones, dedup, anti-stacking.
+ * Sound System suite (2026-08-23 REDESIGN) — multiple candidate tones, dedup, anti-stacking.
+ * Previous single-guess tones were rejected; each category now has candidate A/B functions.
+ * Wired defaults: general=playNotificationB (pop), new-request=playNewRequestA (3-note rise),
+ * booking=playBookingConfirmedB (swoosh-to-chime). Swap = one line in lib/sound.ts delegates.
  *
  * THREE layers, no browser needed:
  *  STATIC (S1-S6): wiring guards — correct function at every call site, exclusions intact,
@@ -86,6 +89,13 @@ async function waitFor(fn, timeout = 8000, step = 150) {
     !/notifyAlert\(/.test(storeSrc + providerSrc) && !/playAlert\(/.test(storeSrc + providerSrc));
   check('S6 anti-stack gap + per-id claim guards present in sound.ts (MIN_TONE_GAP_MS + claimAudible TTL keys)',
     /MIN_TONE_GAP_MS/.test(soundSrc) && /claimAudible\(/.test(soundSrc) && /MIN_TONE_GAP_MS\s*=\s*\d{3,}/.test(soundSrc));
+  check('S7 all six candidates exported AND wired defaults delegate to exactly one candidate each (B / A / B)',
+    /export function playNotificationA/.test(soundSrc) && /export function playNotificationB/.test(soundSrc) &&
+    /export function playNewRequestA/.test(soundSrc) && /export function playNewRequestB/.test(soundSrc) &&
+    /export function playBookingConfirmedA/.test(soundSrc) && /export function playBookingConfirmedB/.test(soundSrc) &&
+    /WIRED DEFAULT \(candidate B\)/.test(soundSrc) && /playNewRequestA\(\); \/\/<\!--|playNewRequestA\(\); \/\/ <-- WIRED DEFAULT \(candidate A\)/.test(soundSrc.replace(/\s+/g,' ')) &&
+    /export function SoundPreviewScreen/.test(fs.readFileSync(path.join(__dirname, '../../frontend/src/components/SoundPreview.tsx'), 'utf8')) &&
+    /import\.meta\.env\.DEV/.test(fs.readFileSync(path.join(__dirname, '../../frontend/src/screens/profile.tsx'), 'utf8')));
 
   console.log('\n=== UNIT — real compiled sound.ts under mock AudioContext ===');
   cp.execSync(`${path.join(__dirname, '../../frontend/node_modules/.bin/esbuild')} ${soundSrcPath} --format=esm --outfile=${SOUND_ESM}`, { stdio: 'pipe' });
@@ -112,37 +122,37 @@ async function waitFor(fn, timeout = 8000, step = 150) {
     };
   }
 
-  // U1 notification ping: 2 notes, rising, subtle peaks, well under 0.5s
+  // U1 notification ping: DEFAULT = candidate B pop — 1 bubble note, quick upward pitch bend
   sound.resetSoundGuardsForTests(); notes.length = 0; gains.length = 0; vibes.length = 0;
   sound.playNotificationTone('n-u1');
   {
-    const freqs = notes.map((n) => n.freq).sort((a, b) => a - b);
     const span = Math.max(...notes.map((n) => n.stop), 0);
     const peaks = gains.filter((g) => g.peak !== undefined).map((g) => g.peak);
-    check('U1 general ping = 2 soft rising notes (E5~659/A5~880), <=0.30s span, peak<=0.12, NO vibration, no sweep',
-      notes.length === 2 && freqs[0] < freqs[1] && span <= 0.31 && Math.max(...peaks) <= 0.12 && vibes.length === 0 &&
-      notes.every((n) => n.sweepTo === undefined), { freqs, span, peaks, vibes: vibes.length });
+    check('U1 general ping = 1 soft pop note with quick upward bend (520->900), <=0.25s span, peak<=0.12, NO vibration',
+      notes.length === 1 && Math.abs(notes[0].freq - 520) < 2 && Math.abs(notes[0].sweepTo - 900) < 2 &&
+      notes[0].sweepAt <= 0.1 && span <= 0.25 && Math.max(...peaks) <= 0.12 && vibes.length === 0,
+      { notes: notes.length, freq: notes[0]?.freq, sweepTo: notes[0]?.sweepTo, span, peaks, vibes: vibes.length });
   }
 
   // U2 same notification id cannot sound twice
-  { const before = notes.length; sound.resetSoundGuardsForTests(); sound.playNotificationTone('dup-n'); sound.playNotificationTone('dup-n'); check('U2 same notificationId twice -> exactly ONE ping (per-id dedup)', notes.length - before === 2, notes.length - before); }
+  { const before = notes.length; sound.resetSoundGuardsForTests(); sound.playNotificationTone('dup-n'); sound.playNotificationTone('dup-n'); check('U2 same notificationId twice -> exactly ONE ping (per-id dedup)', notes.length - before === 1, notes.length - before); }
 
   // U3 burst of 3 DIFFERENT notifications collapses to 1 audible (global 550ms anti-stack gap)
   sound.resetSoundGuardsForTests(); notes.length = 0;
   sound.playNotificationTone('b1'); sound.playNotificationTone('b2'); sound.playNotificationTone('b3');
-  check('U3 three rapid distinct notifications -> exactly ONE audible ping (anti-stacking gap, no overlap)', notes.length === 2, notes.length);
+  check('U3 three rapid distinct notifications -> exactly ONE audible ping (anti-stacking gap, no overlap)', notes.length === 1, notes.length);
 
-  // U4 booking tone: 3-note ascending C5-E5-G5 arpeggio, <=0.7s, success vibration
+  // U4 booking tone: DEFAULT = candidate B swoosh-to-chime — upward sweep resolving to a held
+  //     clean tone (+soft octave shimmer), <=0.7s total, success vibration
   sound.resetSoundGuardsForTests(); notes.length = 0; gains.length = 0; vibes.length = 0;
   sound.playBookingConfirmedTone('offer-u4');
   {
-    const freqs = notes.map((n) => n.freq);
-    const asc = freqs.length === 3 && freqs[0] < freqs[1] && freqs[1] < freqs[2];
     const span = Math.max(...notes.map((n) => n.stop), 0);
-    const close = (a, b, tol = 2) => Math.abs(a - b) < tol;
-    check('U4 booking tone = ascending 3-note major arpeggio C5-E5-G5, <=0.7s span, double-pulse success vibration',
-      asc && close(freqs[0], 523.25) && close(freqs[1], 659.25) && close(freqs[2], 783.99) && span <= 0.7 &&
-      JSON.stringify(vibes[0]) === JSON.stringify([120, 60, 120]), { freqs, span, vibes });
+    check('U4 booking tone = swoosh-to-chime (360->880 sweep resolving + octave shimmer), <=0.7s, double-pulse success vibration',
+      notes.length === 2 && Math.abs(notes[0].freq - 360) < 2 && Math.abs(notes[0].sweepTo - 880) < 2 &&
+      Math.abs(notes[0].sweepAt - 0.26) < 0.03 && Math.abs(notes[1].freq - 1760) < 2 && span <= 0.7 &&
+      JSON.stringify(vibes[0]) === JSON.stringify([120, 60, 120]),
+      { n: notes.length, f0: notes[0]?.freq, sw: notes[0]?.sweepTo, f1: notes[1]?.freq, span, vibes });
   }
 
   // U5 booking dedup: action path AND socket event for the SAME offer -> one arpeggio; different offer -> second plays
@@ -150,26 +160,44 @@ async function waitFor(fn, timeout = 8000, step = 150) {
   sound.playBookingConfirmedTone('offer-x'); sound.playBookingConfirmedTone('offer-x');
   const afterDup = notes.length;
   sound.resetSoundGuardsForTests(); sound.playBookingConfirmedTone('offer-y');
-  check('U5 same offerId twice -> 1 arpeggio (3 notes); a DIFFERENT offerId still plays', afterDup === 3 && notes.length === 6, { afterDup, total: notes.length });
+  check('U5 same offerId twice -> 1 booking tone (2 oscs); a DIFFERENT offerId still plays', afterDup === 2 && notes.length === 4, { afterDup, total: notes.length });
 
-  // U6 new-request: distinct (down sweep 880->440, weightier), id-deduped, vibrates even when audible-gap collapses a burst
+  // U6 new-request: DEFAULT = candidate A 3-note ascending run (C5-E5-G5 triangle, alert),
+  //     id-deduped, vibrates even when audible-gap collapses a burst
   sound.resetSoundGuardsForTests(); notes.length = 0; vibes.length = 0;
   sound.playNewRequestTone('req-1'); sound.playNewRequestTone('req-1');
-  const notesOne = notes.length; const sweep = notes[0]?.sweepTo;
+  const notesOne = notes.length;
+  const asc3 = notes.length === 3 && notes[0].freq < notes[1].freq && notes[1].freq < notes[2].freq &&
+    Math.abs(notes[0].freq - 523.25) < 2 && Math.abs(notes[2].freq - 783.99) < 2;
   sound.playNewRequestTone('req-2'); // inside gap -> not audible BUT still vibrates (independent haptic)
-  check('U6 new-request = 880->440 down sweep (alert, distinct from ping/arpeggio); same id muted; NEW id still vibrates in-gap',
-    notesOne === 1 && sweep !== undefined && Math.abs(sweep - 440) < 2 && notes.length === 1 &&
-    vibes.length === 2 && JSON.stringify(vibes[0]) === JSON.stringify([200, 100, 200]), { notesOne, sweep, totalNotes: notes.length, vibes });
+  check('U6 new-request = ascending 3-note run C5-E5-G5 (alert, distinct from pop/swoosh); same id muted; NEW id still vibrates in-gap',
+    notesOne === 3 && asc3 && notes.length === 3 && notes.every((n) => n.sweepTo === undefined) &&
+    vibes.length === 2 && JSON.stringify(vibes[0]) === JSON.stringify([200, 100, 200]), { notesOne, totalNotes: notes.length, vibes });
 
   // U7 cross-tone stacking guard: booking within 550ms of a ping is suppressed (no overlap), ping id still claimable later
   sound.resetSoundGuardsForTests(); notes.length = 0;
   sound.playNotificationTone('cross-1'); sound.playBookingConfirmedTone('cross-offer');
-  const suppressed = notes.length === 2;
+  const suppressed = notes.length === 1;
   sound.resetSoundGuardsForTests(); sound.playBookingConfirmedTone('cross-offer');
-  check('U7 tones never overlap (booking inside ping gap suppressed; after reset same offer claimable again)', suppressed && notes.length === 5, notes.length);
+  check('U7 tones never overlap (booking inside ping gap suppressed; after reset same offer claimable again)', suppressed && notes.length === 3, notes.length);
 
   // U8 legacy exports still function (back-compat) without crashing headless
   { let threw = false; try { sound.resetSoundGuardsForTests(); sound.notifyAlert('positive'); sound.playAlert('negative'); sound.vibrateAlert('new-request'); } catch { threw = true; } check('U8 legacy playAlert/notifyAlert/vibrateAlert remain safe (no throw, gap-applied)', !threw); }
+
+  // U9 the NON-default candidates are real, distinct and correctly shaped (A/B panel must not lie)
+  sound.resetSoundGuardsForTests(); notes.length = 0; vibes.length = 0;
+  sound.playNotificationA();
+  const okNA = notes.length === 2 && notes[0].freq < notes[1].freq && Math.abs(notes[0].freq - 783.99) < 2 && vibes.length === 0;
+  sound.resetSoundGuardsForTests(); notes.length = 0; vibes.length = 0;
+  sound.playNewRequestB();
+  const okRB = notes.length === 2 && Math.abs(notes[0].freq - notes[1].freq) < 1 && Math.abs(notes[1].start - 0.15) < 0.02 && vibes.length === 1;
+  sound.resetSoundGuardsForTests(); notes.length = 0; vibes.length = 0;
+  sound.playBookingConfirmedA();
+  const okBA = notes.length === 4 && notes.every((n, i) => i === 0 || notes[i - 1].freq < n.freq) &&
+    Math.abs(notes[0].freq - 523.25) < 2 && Math.abs(notes[3].freq - 1046.5) < 2 &&
+    Math.max(...notes.map((n) => n.stop)) <= 0.65 && JSON.stringify(vibes[0]) === JSON.stringify([120, 60, 120]);
+  check('U9 alternate candidates real + distinct: A ping=2-note chime, B newreq=double-knock (150ms), A booking=4-note C-major arpeggio',
+    okNA && okRB && okBA, { okNA, okRB, okBA });
 
   console.log('\n=== LIVE — real payloads through the compiled module (backend :5000) ===');
   // Real two-user flow: customer + provider (same city/category), request, offer, accept, chat.
@@ -222,8 +250,8 @@ async function waitFor(fn, timeout = 8000, step = 150) {
   const ntype = gotNotif && (gotNotif.notification?.type || gotNotif.type);
   const nid = gotNotif && ((gotNotif.notification && (gotNotif.notification.id ?? gotNotif.notification._id)) || gotNotif.id || gotNotif._id);
   if (ntype && ntype !== 'offer_accepted' && ntype !== 'request_new') sound.playNotificationTone(String(nid));
-  check('L2 live accept -> action+socket+notification all fed: exactly ONE booking arpeggio (3 notes), ZERO general pings for offer_accepted',
-    notes.length === 3, { notes: notes.length, sockOfferId, ntype });
+  check('L2 live accept -> action+socket+notification all fed: exactly ONE booking swoosh-chime (2 oscs), ZERO general pings for offer_accepted',
+    notes.length === 2, { notes: notes.length, sockOfferId, ntype });
 
   // chat message -> new_message persisted ping on counter-party: type not excluded -> ONE ping; burst collapse proven by U3.
   // NOTE: chat is socket-only (chat:send) - there is no REST message POST.
@@ -235,7 +263,7 @@ async function waitFor(fn, timeout = 8000, step = 150) {
   const msgNotif = await waitFor(() => sockEvts.notifs.find((n) => (n.notification?.type || n.type) === 'new_message'));
   notes.length = 0; sound.resetSoundGuardsForTests();
   if (msgNotif) { const mtype = msgNotif.notification?.type || msgNotif.type; if (mtype !== 'offer_accepted' && mtype !== 'request_new') sound.playNotificationTone(String((msgNotif.notification && (msgNotif.notification.id ?? msgNotif.notification._id)) || msgNotif.id)); }
-  check('L3 new chat message -> provider gets persisted new_message -> exactly ONE general ping (2 soft notes)', !!msgNotif && notes.length === 2, { got: !!msgNotif, notes: notes.length });
+  check('L3 new chat message -> provider gets persisted new_message -> exactly ONE general ping (1 soft pop)', !!msgNotif && notes.length === 1, { got: !!msgNotif, notes: notes.length });
 
   check('L4 request:new id + notification types observed live are consistent with the wired exclusions',
     !!seenReq && ntype === 'offer_accepted', { ntype });

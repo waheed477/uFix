@@ -207,6 +207,13 @@ export function ProfileTab() {
           <MenuItem icon={<GearIcon className="h-5 w-5" />} label="Settings" onClick={() => {}} />
         </div>
 
+        {import.meta.env.DEV && (
+          /* TEMP dev-only entry to the Sound Preview A/B panel (2026-08-23) — remove with the
+             panel before production deployment; already invisible in prod builds via DEV gate. */
+          <button onClick={() => navigate("soundPreview")} className="tap-highlight-none flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50 py-3 text-sm font-semibold text-amber-700">
+            🎧 Sound Preview (DEV — tap to compare tone candidates)
+          </button>
+        )}
         <button onClick={logout} className="tap-highlight-none flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 font-semibold text-rose-500 shadow-card">
           <LogoutIcon className="h-5 w-5" /> Log out
         </button>

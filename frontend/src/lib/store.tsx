@@ -108,7 +108,8 @@ export type Screen =
   | "chat"
   | "rating"
   | "history"
-  | "editProfile";
+  | "editProfile"
+  | "soundPreview"; // TEMP dev-only (SoundPreview panel) — remove from production
 
 interface Toast {
   msg: string;
@@ -1306,10 +1307,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const vp = (backendRequest as any).viewingProviders;
         setViewCounts(prev => ({ ...prev, [frontendJob.id]: { count: Number(vp.count) || 0, category: vp.category || category } }));
       }
-      setStack(['availableProviders']); // NEW: Direct discovery model - show available providers with price from profile, not offers wait
-      
+      // BUG FIX (2026-08-23 — "customer sees an offer before any provider sends one"):
+      // root cause was THIS line's previous target 'availableProviders' — that screen renders
+      // full provider cards (avatar + stars + "PKR <profile default>" + Book Now) that are
+      // visually identical to an offer card, priced from the provider's PROFILE default, so
+      // right after posting the customer appeared to already have a priced offer. Live trace
+      // proved the backend is clean (GET offers empty, no offer:new until a real POST), so
+      // the fix is to land on the OFFERS waiting screen instead — which waits correctly at
+      // zero cards with the live viewing pill until a provider explicitly submits an offer.
+      // Direct booking stays reachable as an EXPLICIT choice (Jobs tab "Providers" button).
+      setStack(['offers']); // land on the offers/waiting screen — zero cards until a real offer
+
       showToast(`Request posted in ${location.city || user?.city || 'your city'}! Finding ${category} pros...`, 'check');
-      console.log(`[postRequest] Created request ${frontendJob.id} in city ${location.city}, navigating to availableProviders`);
+      console.log(`[postRequest] Created request ${frontendJob.id} in city ${location.city}, navigating to offers waiting screen`);
     } catch (err: any) {
       console.error('Post request failed', err);
       showToast(err.message || 'Failed to post request', 'info');
