@@ -153,12 +153,12 @@ const FSD = { lng: 73.0776, lat: 31.4181, city: 'Faisalabad' };
   const doneC = await scC.waitFor('job:statusUpdate', 6000, (d) => d.status === 'completed' || d.job?.status === 'completed');
   check('customer LIVE completed (drives notification + rating prompt)', !!doneC);
 
-  beat('12. Dual rating (customer->provider, provider->customer) + duplicate guard');
+  beat('12. CUSTOMER-ONLY rating (customer->provider ok, provider->customer 403) + duplicate guard');
   const r1 = await api(`/api/jobs/${jobId}/rate`, { method: 'POST', token: cust.token, body: { rating: 5, comment: 'Quick and tidy work' } });
   const r2 = await api(`/api/jobs/${jobId}/rate`, { method: 'POST', token: prov.token, body: { rating: 4, comment: 'Clear instructions' } });
   const rDup = await api(`/api/jobs/${jobId}/rate`, { method: 'POST', token: cust.token, body: { rating: 3 } });
-  check('both rated (201/200) + duplicate blocked (400)',
-    [200, 201].includes(r1.status) && [200, 201].includes(r2.status) && rDup.status === 400, [r1.status, r2.status, rDup.status]);
+  check('customer rated (201/200) + provider BLOCKED 403 (customer-only) + duplicate blocked (400)',
+    [200, 201].includes(r1.status) && r2.status === 403 && r2.data?.code === 'CUSTOMER_ONLY_RATING' && rDup.status === 400, [r1.status, r2.status, rDup.status]);
 
   beat('13. Order history + notification bell trail, both sides');
   const histC = await api('/api/jobs/history?status=completed', { token: cust.token });
@@ -172,10 +172,10 @@ const FSD = { lng: 73.0776, lat: 31.4181, city: 'Faisalabad' };
   const typesP = (notifP.data?.notifications || []).map((n) => n.type);
   console.log('   customer bell:', typesC.join(' | '));
   console.log('   provider bell:', typesP.join(' | '));
-  check('customer trail has new_offer + job_status_update (arrived/in_progress/completed) + new_rating ' +
-        '(actor gets no self offer_accepted - deliberate: persisted bells go to counter-parties; ' +
-        'the customer IS the accepting actor and gets instant UI feedback instead)',
-    ['new_offer', 'job_status_update', 'new_rating'].every((t) => typesC.includes(t)) &&
+  check('customer trail has new_offer + job_status_update (arrived/in_progress/completed), and NO new_rating ' +
+        '(customers are never rated since 2026-08-23; actor gets no self offer_accepted either - deliberate: ' +
+        'persisted bells go to counter-parties; the customer IS the accepting actor and gets instant UI feedback instead)',
+    ['new_offer', 'job_status_update'].every((t) => typesC.includes(t)) && !typesC.includes('new_rating') &&
       typesC.filter((t) => t === 'job_status_update').length >= 3, typesC);
   check('provider trail has offer_declined + offer_accepted + new_rating, and NO request_new (2026-08-21 semantics: seeing != notification)',
     ['offer_declined', 'offer_accepted', 'new_rating'].every((t) => typesP.includes(t)) && !typesP.includes('request_new'), typesP);

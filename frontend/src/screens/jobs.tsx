@@ -247,7 +247,7 @@ export function ActiveJobScreen() {
               )
             ) : providerStep ? (
               <Button full size="lg" onClick={() => updateJobStatus(activeJob.id, providerStep.status)} disabled={isUpdatingStatus}>{isUpdatingStatus ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : providerStep.label}</Button>
-            ) : activeJob.status === "completed" ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-center text-xs font-semibold text-emerald-700">Job completed! 🎉 You'll be prompted to rate your customer.</p> : null}
+            ) : activeJob.status === "completed" ? <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-center text-xs font-semibold text-emerald-700">✅ Job marked complete — nice work! The customer will rate their experience.</p> : null}
           </div>
         </div>
       </div>
@@ -371,9 +371,21 @@ export function RatingScreen() {
     );
   }
 
-  // Bidirectional Sync (Part B.4): BOTH sides rate each other - the screen must be role-aware.
-  // Customer rates the provider; provider rates the customer (backend auto-derives toUser).
+  // CUSTOMER-ONLY RATINGS (2026-08-23): this screen is customer-only. If a provider somehow
+  // lands here (all entry points are gated: openJobRating guard + completion handlers), show a
+  // dead-end state instead of any rating UI - providers never rate customers.
   const isCustomer = user?.role === "customer";
+  if (!isCustomer) {
+    return (
+      <div className="flex h-full flex-col bg-ink-50">
+        <ScreenHeader onBack={back} title="Rate" />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <p className="text-sm font-medium text-ink-500">Only customers rate their pro — providers don't rate customers.</p>
+          <Button size="sm" onClick={back}>Go back</Button>
+        </div>
+      </div>
+    );
+  }
   const peerName = isCustomer ? activeJob.providerName : activeJob.customerName;
   const peerInitials = isCustomer ? activeJob.providerAvatarInitials ?? "P" : activeJob.customerAvatarInitials ?? "C";
   const peerColor = isCustomer ? activeJob.providerAvatarColor ?? "#167a6c" : activeJob.customerAvatarColor ?? "#167a6c";
@@ -396,12 +408,12 @@ export function RatingScreen() {
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             {TAGS.map((t) => (<button key={t} onClick={() => toggleTag(t)} className={cn("rounded-full border px-3 py-1.5 text-xs font-semibold", tags.includes(t) ? "border-brand-500 bg-brand-50 text-brand-700" : "border-ink-200 text-ink-500")}>{t}</button>))}
           </div>
-          <textarea value={review} onChange={(e) => setReview(e.target.value)} rows={3} maxLength={200} placeholder={isCustomer ? "Share a few words about the pro…" : "Share a few words about the customer…"} className="mt-5 w-full resize-none rounded-2xl border-2 border-ink-100 bg-ink-50 p-3.5 text-sm text-ink-900 outline-none placeholder:text-ink-300 focus:border-brand-400 focus:bg-white" />
+          <textarea value={review} onChange={(e) => setReview(e.target.value)} rows={3} maxLength={200} placeholder="Share a few words about the pro…" className="mt-5 w-full resize-none rounded-2xl border-2 border-ink-100 bg-ink-50 p-3.5 text-sm text-ink-900 outline-none placeholder:text-ink-300 focus:border-brand-400 focus:bg-white" />
         </div>
       </div>
       <div className="border-t border-ink-100 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button full size="lg" onClick={submit} disabled={rating === 0 || isSubmitting}>{isSubmitting ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : `Submit rating${isCustomer ? "" : " for customer"}`}</Button>
-        <p className="mt-2 text-center text-[11px] text-ink-400">The other party gets a live "You received a new rating" notification.</p>
+        <Button full size="lg" onClick={submit} disabled={rating === 0 || isSubmitting}>{isSubmitting ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : "Submit rating"}</Button>
+        <p className="mt-2 text-center text-[11px] text-ink-400">Your pro gets a live "You received a new rating" notification.</p>
       </div>
     </div>
   );
@@ -503,7 +515,7 @@ export function JobsTab() {
               <ChevronRightIcon className="h-5 w-5 text-white/70" />
             </div>
           )}
-          <div className="space-y-2.5">{sorted.map((j) => (<JobCard key={j.id} job={j} onOpen={active?.id === j.id ? () => navigate("activeJob") : (j as any)._originalStatus === 'pending' || j.status === 'open' ? () => navigate("offers") : j.status === 'completed' && !j.rating ? () => openJobRating(j.id) : undefined} />))}</div>
+          <div className="space-y-2.5">{sorted.map((j) => (<JobCard key={j.id} job={j} onOpen={active?.id === j.id ? () => navigate("activeJob") : (j as any)._originalStatus === 'pending' || j.status === 'open' ? () => navigate("offers") : j.status === 'completed' && !j.rating && user?.role === 'customer' ? () => openJobRating(j.id) : undefined} />))}</div>
         </div>
       )}
     </div>

@@ -42,18 +42,18 @@ const ROWS: Row[] = [
   },
   {
     title: "2 — New-request alert (provider)",
-    subtitle: "the “you might earn work” signal + vibration",
+    subtitle: "the “you might earn work” signal + vibration · candidates REPLACED 2026-08-23 (ascending run / double-ping retired)",
     candidates: [
-      { name: "playNewRequestA", fn: playNewRequestA, desc: "3-note ascending run C5-E5-G5, triangle, ~0.45s", isDefault: true },
-      { name: "playNewRequestB", fn: playNewRequestB, desc: "Double-knock: one clear tone twice, 150ms apart, ~0.35s", isDefault: false },
+      { name: "playNewRequestA", fn: playNewRequestA, desc: "Knock: low sharp-attack thump with pitch fall + faint tick (~0.25s)", isDefault: true },
+      { name: "playNewRequestB", fn: playNewRequestB, desc: "Marimba pluck: woody A5 mallet note + quiet octave shimmer (~0.35s)", isDefault: false },
     ],
   },
   {
     title: "3 — Booking / accept confirmation",
-    subtitle: "offer accepted — customer action + provider offer:accepted",
+    subtitle: "offer accepted — customer action + provider offer:accepted · candidates REPLACED 2026-08-23 (arpeggio / swoosh retired)",
     candidates: [
-      { name: "playBookingConfirmedA", fn: playBookingConfirmedA, desc: "Major arpeggio C5-E5-G5-C6, warm sine, ~0.57s", isDefault: false },
-      { name: "playBookingConfirmedB", fn: playBookingConfirmedB, desc: "Swoosh-to-chime: upward sweep resolving to a held tone, ~0.6s", isDefault: true },
+      { name: "playBookingConfirmedA", fn: playBookingConfirmedA, desc: "Cha-ching: clean E6→G6 double-tone 60ms apart, payment-app feel (~0.35s)", isDefault: true },
+      { name: "playBookingConfirmedB", fn: playBookingConfirmedB, desc: "Warm sustained E5 hold with gentle end vibrato/shimmer (~0.65s)", isDefault: false },
     ],
   },
 ];

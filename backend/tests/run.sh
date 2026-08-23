@@ -21,6 +21,7 @@ TEST_SUITES=(
   tests/offers-visibility-and-card.js      # Zero-offers-before-submit live proof + offer-card layout zone locks
   tests/no-premature-offer.js              # BUG FIX lock: empty offers until provider POSTs; root-cause nav guard (2026-08-23)
   tests/distance-ux.js                     # Distance UX: shared pattern/ETA (18 km/h), 3-way sort, Closest badge, live snapshot proof (2026-08-23)
+  tests/chat-no-duplicate.js               # Chat duplicate fix: sender self-echo reconciles optimistic temp; exactly-one live incl. rapid sends (2026-08-23)
 )
 
 total_pass=0; total_fail=0; failed_suites=()

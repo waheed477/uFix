@@ -19,9 +19,14 @@ const { createNotification } = require('../utils/notify');
 
 /**
  * @route POST /api/jobs/:jobId/rate
- * @desc Rate the other party after job completion
+ * @desc Rate the PROVIDER after job completion (2026-08-23: CUSTOMER-ONLY - the
+ *       provider→customer direction was permanently REMOVED per the Uber/inDrive
+ *       convention: only the service-receiver rates the service-provider. The Review
+ *       schema (fromUser/toUser) is intentionally left as-is - only customer→provider
+ *       reviews will ever be created going forward; customer users simply never
+ *       accumulate rating/reviews (aggregation of zero matches is a safe no-op).
  * @body { rating: 1-5 integer, comment?: optional max 500 }
- * @access Private, only job participants, only if job status completed
+ * @access Private - ONLY the job's customer, only if job status completed
  */
 const rateJob = async (req, res) => {
   try {
@@ -70,7 +75,9 @@ const rateJob = async (req, res) => {
       });
     }
 
-    // Only participants can rate
+    // 2026-08-23 (customer-only ratings): ONLY the job's customer may rate. The provider
+    // rating the customer is REMOVED (not just hidden in the UI) - a provider requester
+    // gets a hard 403 here. Non-participants get 403 as before.
     const userId = req.user.id.toString();
     const isCustomer = job.customer.toString() === userId;
     const isProvider = job.provider.toString() === userId;
@@ -82,12 +89,20 @@ const rateJob = async (req, res) => {
       });
     }
 
-    // Determine toUser automatically based on requester role
-    // If requester is customer, they rate provider, and vice versa
-    const toUserId = isCustomer ? job.provider.toString() : job.customer.toString();
+    if (!isCustomer) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only the customer can rate. Providers cannot rate customers.',
+        code: 'CUSTOMER_ONLY_RATING'
+      });
+    }
+
+    // Direction is fixed: customer → provider, always.
+    const toUserId = job.provider.toString();
     const fromUserId = userId;
 
-    // Prevent self-rating (should not happen, but just in case)
+    // Prevent self-rating (cannot happen with a fixed customer→provider direction unless
+    // the same account is oddly both parties - kept as a safety rail)
     if (fromUserId === toUserId) {
       return res.status(400).json({
         status: 'error',
@@ -149,8 +164,9 @@ const rateJob = async (req, res) => {
     await review.populate('fromUser', 'name role');
     await review.populate('toUser', 'name role rating reviews');
 
-    // --- Bidirectional Sync pass (Part D row 8): notify the rated party live ---
-    // "Rating submitted → the other party gets: Notification 'You received a new rating'"
+    // --- new_rating notification (2026-08-23): recipient is ALWAYS the provider now -
+    // the customer can never receive a rating (provider→customer removed), so no
+    // new_rating is ever created for a customer by construction.
     // Trivial addition via existing notify utility (persists + emits notification:new).
     try {
       await createNotification({

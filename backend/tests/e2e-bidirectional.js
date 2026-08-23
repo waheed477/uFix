@@ -236,18 +236,16 @@ async function main() {
   await pCompletedP;
   check('BOTH sides received job:statusUpdate completed (rating prompt moment)', true);
 
-  // Rating blocked before... allowed after completion — customer rates provider, provider rates customer
+  // CUSTOMER-ONLY RATINGS (2026-08-23): customer rates provider; provider→customer removed (403 forever)
   const pRatingNotif = scA.waitFor('notification:new', { filter: d => d.notification?.type === 'new_rating' });
   const rate1 = await api(`/api/jobs/${jobId}/rate`, { method: 'POST', token: customer.token, body: { rating: 5, comment: 'Fixed fast, very professional' } });
   check('Customer rates provider (201)', rate1.status === 201, rate1);
   const ratingEvtA = await pRatingNotif;
   check('Provider got new_rating notification live ("You received a new rating")', ratingEvtA.notification?.type === 'new_rating', ratingEvtA);
 
-  const pRatingNotifC = scC.waitFor('notification:new', { filter: d => d.notification?.type === 'new_rating' });
   const rate2 = await api(`/api/jobs/${jobId}/rate`, { method: 'POST', token: providerA.token, body: { rating: 4, comment: 'Good customer' } });
-  check('Provider rates customer (201)', rate2.status === 201, rate2);
-  await pRatingNotifC;
-  check('Customer got new_rating notification live', true);
+  check('Provider CANNOT rate customer anymore (403 CUSTOMER_ONLY_RATING - direction permanently removed)',
+    rate2.status === 403 && rate2.data?.code === 'CUSTOMER_ONLY_RATING', rate2);
 
   const dupRate = await api(`/api/jobs/${jobId}/rate`, { method: 'POST', token: customer.token, body: { rating: 3 } });
   check('Guard: duplicate rating blocked (400)', dupRate.status === 400);
@@ -272,8 +270,8 @@ async function main() {
   check('Provider A bell contains offer_declined (from step 3)', typesOf(notifsA).has('offer_declined'), [...typesOf(notifsA)]);
   check('Provider A bell contains offer_accepted + job_status_update + new_rating',
     typesOf(notifsA).has('offer_accepted') && typesOf(notifsA).has('job_status_update') && typesOf(notifsA).has('new_rating'));
-  check('Customer bell contains new_offer + job_status_update + new_rating',
-    typesOf(notifsC).has('new_offer') && typesOf(notifsC).has('job_status_update') && typesOf(notifsC).has('new_rating'));
+  check('Customer bell contains new_offer + job_status_update and NO new_rating (customers never receive ratings - 2026-08-23)',
+    typesOf(notifsC).has('new_offer') && typesOf(notifsC).has('job_status_update') && !typesOf(notifsC).has('new_rating'));
   check('Provider B bell contains offer_rejected ("Not selected")', typesOf(notifsB).has('offer_rejected'), [...typesOf(notifsB)]);
 
   // ---------- 10. Request CANCEL with pending offer → provider notified + badge data ----------

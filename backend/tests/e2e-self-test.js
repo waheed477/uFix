@@ -21,7 +21,7 @@
  * 13  status on_the_way->arrived->in_progress->completed LIVE each step;
  *     backward + skip attempts rejected 400
  * 14  completion -> live both sides + persisted + rating prompt wiring
- * 15  both parties rate; averages update; duplicate blocked 400
+ * 15  CUSTOMER-ONLY rating (2026-08-23): customer->provider ok; provider->customer 403; averages update; duplicates blocked
  * 16  chat both directions live + read receipts
  * 17  order history both sides (+ cancelled entry on the other customer)
  * 18  notification bells: full trail types both sides + read/unread state
@@ -279,26 +279,30 @@ const SRC = (f) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
   const p1BellNow = (await api('/api/notifications', { token: P1.token })).data?.notifications || [];
   check('S14a job_status_update persisted on BOTH bells (customer + provider)',
     c1BellNow.some((n) => n.type === 'job_status_update') && p1BellNow.some((n) => n.type === 'job_status_update'));
-  check("S14b rating prompt wired: job:statusUpdate completed handler -> role-aware toast + setStack(['rating'])",
-    /job:statusUpdate[\s\S]{0,1400}?Please rate your experience[\s\S]{0,400}?Rate your customer[\s\S]{0,400}?setStack\(\['rating'\]\)/.test(storeSrc));
+  check("S14b CUSTOMER-ONLY rating prompt: completed handler -> customer toast + setStack(['rating']); provider gets clean confirmation & NO rating nav",
+    /job:statusUpdate[\s\S]{0,1600}?Please rate your experience[\s\S]{0,500}?setStack\(\['rating'\]\)/.test(storeSrc) &&
+    /Job marked complete — nice work!/.test(storeSrc) && !/Rate your customer/.test(storeSrc));
 
-  console.log('\n=== Step 15: ratings both directions ===');
+  console.log('\n=== Step 15: ratings — CUSTOMER-ONLY (provider direction removed 2026-08-23) ===');
   const ra1 = await api(`/api/jobs/${JOB}/rate`, { method: 'POST', token: C1.token, body: { rating: 5, comment: 'Excellent plumber, fixed fast' } });
   const ra2 = await api(`/api/jobs/${JOB}/rate`, { method: 'POST', token: P1.token, body: { rating: 4, comment: 'Good customer' } });
-  check('S15a customer->provider 5★ and provider->customer 4★ both 201', ra1.status === 201 && ra2.status === 201, { ra1: ra1.status, ra2: ra2.status });
+  check('S15a customer->provider 201 AND provider->customer BLOCKED 403 (CUSTOMER_ONLY_RATING - permanently removed)',
+    ra1.status === 201 && ra2.status === 403 && ra2.data?.code === 'CUSTOMER_ONLY_RATING', { ra1: ra1.status, ra2: ra2.status, code: ra2.data?.code });
   const p1Prof = await api('/api/users/profile', { token: P1.token });
   const c1Prof2 = await api('/api/users/profile', { token: C1.token });
   const p1u = p1Prof.data?.user || p1Prof.data, c1u = c1Prof2.data?.user || c1Prof2.data;
-  check('S15b averages updated: provider rating 5 (1 review), customer rating 4 (1 review)',
-    p1u?.rating === 5 && p1u?.reviews === 1 && c1u?.rating === 4 && c1u?.reviews === 1,
+  check('S15b provider average updated (5★, 1 review); customer stays at defaults (never rated - direction removed)',
+    p1u?.rating === 5 && p1u?.reviews === 1 && (c1u?.rating === 0 || c1u?.rating === undefined || c1u?.rating === null) && !c1u?.reviews,
     { prov: [p1u?.rating, p1u?.reviews], cust: [c1u?.rating, c1u?.reviews] });
   const dup1 = await api(`/api/jobs/${JOB}/rate`, { method: 'POST', token: C1.token, body: { rating: 3 } });
   const dup2 = await api(`/api/jobs/${JOB}/rate`, { method: 'POST', token: P1.token, body: { rating: 3 } });
-  check('S15c duplicate rating blocked 400 BOTH directions', dup1.status === 400 && dup2.status === 400, { dup1: dup1.status, dup2: dup2.status });
+  check('S15c duplicate customer rating blocked 400; provider attempt still 403 (not a duplicate - simply not allowed)',
+    dup1.status === 400 && dup2.status === 403, { dup1: dup1.status, dup2: dup2.status });
   await sleep(500);
   const p1Bell2 = (await api('/api/notifications', { token: P1.token })).data?.notifications || [];
   const c1Bell2 = (await api('/api/notifications', { token: C1.token })).data?.notifications || [];
-  check('S15d new_rating persisted to BOTH rated parties', p1Bell2.some((n) => n.type === 'new_rating') && c1Bell2.some((n) => n.type === 'new_rating'));
+  check('S15d new_rating persisted to the PROVIDER only (never the customer - they can no longer receive ratings)',
+    p1Bell2.some((n) => n.type === 'new_rating') && !c1Bell2.some((n) => n.type === 'new_rating'));
 
   console.log('\n=== Step 16: chat both directions + read receipts ===');
   const ack1 = await scC1.emit('chat:send', { jobId: JOB, text: 'Work looks great, thank you!' });
@@ -335,8 +339,8 @@ const SRC = (f) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
   const p1BellF = (await api('/api/notifications?limit=100', { token: P1.token })).data?.notifications || [];
   const c1Types = new Set(c1BellF.map((n) => n.type));
   const p1Types = new Set(p1BellF.map((n) => n.type));
-  check('S18a customer bell trail: new_offer + job_status_update + new_rating + new_message present',
-    ['new_offer', 'job_status_update', 'new_rating', 'new_message'].every((t) => c1Types.has(t)), [...c1Types]);
+  check('S18a customer bell trail: new_offer + job_status_update + new_message present (and NO new_rating - customers are never rated, 2026-08-23)',
+    ['new_offer', 'job_status_update', 'new_message'].every((t) => c1Types.has(t)) && !c1Types.has('new_rating'), [...c1Types]);
   check('S18b provider bell trail: offer_declined + offer_accepted + request_cancelled + job_status_update + new_rating (NO request_new by design)',
     ['offer_declined', 'offer_accepted', 'request_cancelled', 'job_status_update', 'new_rating'].every((t) => p1Types.has(t)) && !p1Types.has('request_new'), [...p1Types]);
   const c2Types18 = new Set((await api('/api/notifications', { token: C2.token })).data?.notifications?.map((n) => n.type) || []);

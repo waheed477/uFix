@@ -575,6 +575,54 @@ Provider request card showed live km (good, but cluttered: redundant static+live
 
 **Verification:** new suite `backend/tests/distance-ux.js` **12/12** (S1-S6 static locks incl. schema/controller snapshot + pattern presence on all 3 surfaces + sort/badge wiring; U1 compiled-module ETA math table; L1-L5 live: two providers at ~1.4km/~7.1km → exact snapshot km per offer via GET AND socket path, persistence across polls, > near < far); full battery **351/351 green** on fresh server; `npm run build` OK (511.54 kB).
 
+## Chat duplicate fix + customer-only ratings + new-request/booking tone replacement — 2026-08-23
+
+### ISSUE 1 — Chat duplicate message (sender saw every own message TWICE): ROOT CAUSE + FIX
+Confirmed mechanism: `sendMessage()` adds an optimistic `temp-…` entry for instant feel, and the
+backend emits `chat:message` to BOTH participants (Phase 7 design). The sender's SELF-echo arrives
+with the real server id — usually BEFORE the `chat:send` ack patches the temp entry — so the naive
+"append unless id exists" listener could never match it and appended a 2nd copy.
+**Fix = OPTION A** (keeps instant feel; ack already documented): new pure helper
+`frontend/src/lib/chatMerge.ts#mergeIncomingChatMessage` — self-echoes (`senderId === myId`) are
+tagged `senderId:'me'` and REPLACE the oldest pending `temp-…` entry IN PLACE; exact real-id
+redelivery is a no-op; recipient path unchanged. Converges to exactly-one under echo-first,
+ack-first, ack-lost and rapid-send orders. Chosen over Option B because the optimistic add and the
+ack-reconcile both already existed — only the echo path needed reconciliation, so no UX delay was
+introduced anywhere. Live-proven: slow send + 4 rapid sequential sends → BOTH sides get exactly one
+`chat:message` per send, distinct ids, none lost, history single.
+
+### ISSUE 2 — Rating is now CUSTOMER-ONLY (provider→customer PERMANENTLY removed, not hidden)
+- Backend `POST /api/jobs/:jobId/rate`: requester that is the job's provider → **403
+  `CUSTOMER_ONLY_RATING`**; direction fixed to customer→provider (`toUser = job.provider` always).
+- Review schema left as-is (deliberate, low-risk): fromUser/toUser keep working; only
+  customer→provider reviews will ever be created going forward. Aggregate with zero matches is a
+  safe no-op — customers simply stay at rating 0/reviews 0 forever.
+- `new_rating` notification now fires ONLY for the provider (by construction — the customer can
+  never receive a rating).
+- Frontend: only the CUSTOMER is navigated to the Rating screen on completion (socket handler +
+  updateJobStatus path). The provider gets a clean "Job marked complete — nice work! 🎉"
+  confirmation and returns to their normal flow (busy lock released); RatingScreen hard-gated
+  (provider sees a dead-end if ever reached), `openJobRating` role-gated, JobsTab rating affordance
+  customer-only, provider ActiveJob complete-chip reworded (no rating promise).
+- Live-proven: customer rates 5★ → provider average 5.0/1 review updates; provider POST → 403;
+  customer bell has NO new_rating; provider bell HAS it. Existing rating tests updated to assert
+  the new direction (e2e-self-test S14b/S15/S18a, e2e-bidirectional, final-lifecycle-run).
+
+### ISSUE 3 — New-request & booking tones REPLACED (general notification tone untouched, still liked)
+Two genuinely different candidates per category in `lib/sound.ts` (panel + docs updated):
+
+| Category | Candidate A | Candidate B | DEFAULT |
+|---|---|---|---|
+| New-request alert | **Knock** — low sharp-attack thump 150→110Hz + faint 900Hz tick (~0.25s) | **Marimba pluck** — woody A5 triangle + quiet octave shimmer (~0.35s) | **A** — a physical "knock at the door" IS the semantics of a new job; unmistakably distinct from all melodic pings |
+| Booking/accept | **Cha-ching** — clean E6→G6 double-tone 60ms apart (~0.35s) | **Warm sustain** — E5 hold ending in gentle pitch vibrato (~0.65s) | **A** — offer acceptance IS a payment-agreement moment; minimal payment-app chime carries exactly that meaning |
+
+Encoding notes: vibrato wobble implemented via discrete exponential frequency ramps (mock- and
+browser-safe, single oscillator). Swap defaults = one line per delegate in lib/sound.ts; the dev-only
+Sound Preview panel lists the new pair with "REPLACED 2026-08-23" badges (still DEV-gated, remove
+before production as already documented).
+**Verification:** sound-system.js 21/21 updated (exact freq/sweep/shape locks on all six candidates
++ live feed-through); NEW chat-no-duplicate.js 12/12; full battery **362/362 green**; build 512.09 kB.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -593,6 +641,7 @@ Provider request card showed live km (good, but cluttered: redundant static+live
 - [x] Offer visibility timing VERIFIED (zero cards pre-submission, exactly one full card post) + offer/provider card layout zone fix (stars vs price, consistent across reuse) - 329/329 green (2026-08-22)
 - [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
 - [x] Distance UX: one shared DistanceDisplay (pin + X.X km + ~N min, 18 km/h ETA assumption), live on provider cards/ActiveJob, accurate backend-computed SNAPSHOT on offer cards (privacy-safe), offers sort Newest/Nearest/Cheapest + provider nearest-first default + ⚡ Closest badge - 351/351 green (2026-08-23)
+- [x] Chat duplicate fix (optimistic temp + self-echo reconciliation via chatMerge helper, exactly-one both sides live incl. rapid sends) + CUSTOMER-ONLY ratings (403 CUSTOMER_ONLY_RATING, provider clean completion confirmation, new_rating provider-only) + new-request/booking tones replaced (knock + cha-ching defaults; notification tone untouched) - 362/362 green (2026-08-23)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

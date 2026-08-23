@@ -73,6 +73,7 @@ import {
 } from "./location";
 import { api, getToken, setToken, setStoredUser, getStoredUser, clearAuth, setAuthSession, getRefreshToken } from "./api";
 import { socketClient } from "./socket";
+import { mergeIncomingChatMessage } from "./chatMerge";
 import { playNotificationTone, playNewRequestTone, playBookingConfirmedTone, vibrateAlert } from "./sound";
 import { reconcileNearbyRequests } from "./listReconcile";
 import {
@@ -667,20 +668,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // Bidirectional Sync (Part B): job COMPLETED is a first-class moment on BOTH sides -
         // prominent feedback + automatic transition into the Rating screen (no digging required):
-        // - Customer: "Your job is complete!" → rate the provider
-        // - Provider: confirmation on their side too → rate the customer (Phase 8 supports both directions)
+        // CUSTOMER-ONLY RATINGS (2026-08-23): only the customer gets the rating prompt.
+        // The provider side gets a plain completion confirmation - NO rating navigation,
+        // NO rating affordance for the customer (provider→customer rating removed entirely).
         if (newStatus === 'completed') {
           vibrateAlert('positive'); // ping via persisted notif
           // Availability lock released: provider is free to receive new matches again
-          if (user.role === 'provider') setProviderBusy(false);
-          setActiveJobId(jobId);
-          if (user.role === 'customer') {
-            showToast('Your job is complete! 🎉 Please rate your experience', 'check');
+          if (user.role === 'provider') {
+            setProviderBusy(false);
+            showToast('Job marked complete — nice work! 🎉', 'check');
+            setTabState('jobs'); // back to the normal provider flow; active request lock released
           } else {
-            showToast('Job completed! 🎉 Rate your customer', 'check');
+            showToast('Your job is complete! 🎉 Please rate your experience', 'check');
+            setActiveJobId(jobId);
+            setTabState('jobs');
+            setStack(['rating']);
           }
-          setTabState('jobs');
-          setStack(['rating']);
         }
       } catch (e) {
         console.error('Failed to handle job:statusUpdate', e);
@@ -714,13 +717,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         const targetJobIdStr = targetJobId.toString();
 
+        // DUPLICATE FIX (2026-08-23): the backend echoes chat:message back to the SENDER too
+        // (by design), while sendMessage() had already added an optimistic temp- entry. A plain
+        // id-dedupe could never match `temp-…` vs the real id, so the sender saw their message
+        // TWICE (echo arrives before the ack patches the temp). mergeIncomingChatMessage
+        // reconciles the self-echo with the oldest pending temp entry IN PLACE (and no-ops on
+        // real-id re-delivery); the recipient path is unchanged (exactly one append per send).
         setMessages(prev => {
           const existing = prev[targetJobIdStr] || [];
-          // Avoid duplicates
-          if (existing.some(m => m.id === chatMessage.id)) return prev;
+          const merged = mergeIncomingChatMessage(existing, chatMessage, user?.id);
+          if (merged === existing) return prev;
           return {
             ...prev,
-            [targetJobIdStr]: [...existing, chatMessage],
+            [targetJobIdStr]: merged,
           };
         });
       } catch (e) {
@@ -1487,12 +1496,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [location.coords]);
 
-  /** Open the rating screen for a specific (completed) job - used by "Rate now" affordances. */
+  /** Open the rating screen for a specific (completed) job - CUSTOMERS ONLY (2026-08-23:
+      ratings are customer→provider exclusively; this guard makes the rating screen
+      unreachable for a provider regardless of entry point). */
   const openJobRating = useCallback((jobId: string) => {
+    if (user?.role !== 'customer') return;
     setActiveJobId(jobId);
     setTabState('jobs');
     setStack(['rating']);
-  }, []);
+  }, [user?.role]);
 
   /** Dismiss one entry from the provider's "Your offers" activity list. */
   const dismissMyOffer = useCallback((offerId: string) => {
@@ -1603,16 +1615,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status } : j));
 
       if (status === 'completed') {
-        // Bidirectional Sync (Part B): provider gets a clear completion confirmation on their
-        // own side and is taken straight to THEIR rating prompt for the customer (Phase 8
-        // supports both directions). The job:statusUpdate socket handler mirrors this for the
-        // customer side; both paths converge on the Rating screen idempotently.
-        showToast('Job completed! 🎉 Rate your customer', 'check');
+        // CUSTOMER-ONLY RATINGS (2026-08-23): the provider who MARKS complete gets a clean
+        // success confirmation and returns to their normal flow - NO rating prompt for the
+        // customer (that direction is removed). The customer's rating prompt arrives via the
+        // job:statusUpdate socket handler above.
+        showToast('Job marked complete — nice work! 🎉', 'check');
         playNotificationTone(); // actor gets no self-notification - ping here
         vibrateAlert('positive');
-        setActiveJobId(jobId);
+        setActiveJobId(null);
         setTabState('jobs');
-        setStack(['rating']);
+        setStack([]);
       } else {
         showToast(`Status updated to ${status.replace('_', ' ')}`, 'check');
       }
