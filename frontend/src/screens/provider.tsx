@@ -14,7 +14,7 @@ import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
 import { categoryById, type IncomingRequest, type SentOffer } from "@/lib/types";
 import { NotificationBell } from "@/components/notifications";
-import { calculateDistanceKm, watchPosition, clearWatch, type Coords } from "@/lib/location";
+import { calculateDistanceKm, watchPosition, clearWatch, getCityCoords, type Coords } from "@/lib/location";
 import { playNewRequestTone } from "@/lib/sound";
 import {
   Avatar,
@@ -251,7 +251,7 @@ function MyOfferCard({ offer, onOpenJob, onDismiss, onWithdraw, isWithdrawing }:
 }
 
 export function ProviderHome() {
-  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location, myOffers, dismissMyOffer, openActiveJob, providerBusy, withdrawOffer } = useApp();
+  const { user, nearbyRequests, toggleOnline, sendOffer, jobs, refreshNearbyRequests, isLoading, location, myOffers, dismissMyOffer, openActiveJob, providerBusy, withdrawOffer, setTab } = useApp();
   const online = user?.isOnline ?? false;
   const firstName = user?.name.split(" ")[0] ?? "there";
   const [liveCoords, setLiveCoords] = useState<Coords | null>(null);
@@ -355,7 +355,22 @@ export function ProviderHome() {
 
   const isLoadingNearby = isLoading['nearbyRequests'];
   const isSendingOffer = isLoading['sendOffer'];
-  const effectiveCoords = liveCoords || location.coords;
+  // Work-location pinning (2026-08-24 Task): a MANUAL pin always wins - a drifting/emulator
+  // GPS (e.g. reporting Okara while the provider is in Gujranwala) must not poison the
+  // live-distance math. Pinned providers get honest distances from their pinned point.
+  const pinnedCoords = (user as any)?.locationSource === "manual" ? (user as any)?.coords : undefined;
+  const effectiveCoords = pinnedCoords || liveCoords || location.coords;
+  // GPS sanity check: live device coords 50km+ away from the provider's matching city means
+  // the GPS is lying/emulated (screenshot case: city Gujranwala, GPS near Okara). Warn and
+  // offer the pin fix instead of silently showing "Distance unavailable" on every card.
+  const gpsMismatchKm = useMemo(() => {
+    if (!liveCoords || (user as any)?.locationSource === "manual") return null;
+    const centre = getCityCoords((user as any)?.city || location.city || "");
+    if (!centre) return null;
+    const d = calculateDistanceKm(liveCoords.lat, liveCoords.lng, centre.lat, centre.lng);
+    return d > 50 ? d : null;
+  }, [liveCoords, user, location.city]);
+
 
   return (
     <div className="flex h-full flex-col bg-ink-50">
@@ -420,6 +435,21 @@ export function ProviderHome() {
               {online && nearbyRequests.length > 0 && <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700">{nearbyRequests.length} new</span>}
               {online && <button onClick={() => refreshNearbyRequests()} disabled={isLoadingNearby} className="tap-highlight-none rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink-600 shadow-card active:scale-95 disabled:opacity-50">{isLoadingNearby ? "..." : "Refresh"}</button>}
             </div>
+          </div>
+        )}
+
+        {gpsMismatchKm !== null && online && !providerBusy && (
+          <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-xs font-bold text-amber-800">⚠️ Aap ka GPS {location.city} se ~{Math.round(gpsMismatchKm)} km door lag raha hai</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-amber-700">
+              Isi liye cards par "Distance unavailable" dikh raha hai. Agar aap {location.city} me hain to Profile me apni work location map par pin karein - pin hamesha GPS par win karti hai.
+            </p>
+            <button
+              onClick={() => setTab("profile")}
+              className="tap-highlight-none mt-2 rounded-xl bg-amber-600 px-3 py-1.5 text-[11px] font-bold text-white active:scale-95"
+            >
+              📌 Profile me location set karein
+            </button>
           </div>
         )}
 

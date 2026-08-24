@@ -82,6 +82,12 @@ export const adaptBackendUserToFrontendUser = (backendUser: any): User => {
   const rating = backendUser.rating ?? 4.8;
   const reviews = backendUser.reviews ?? 23;
   const jobsCompleted = backendUser.jobsCompleted ?? 0;
+  // Work-location pinning: whose coordinates is `location` right now + the stored point
+  const locationSource: 'gps' | 'manual' = backendUser.locationSource === 'manual' ? 'manual' : 'gps';
+  const locArr = backendUser.location?.coordinates;
+  const coords = Array.isArray(locArr) && locArr.length === 2 && !(locArr[0] === 0 && locArr[1] === 0)
+    ? { lng: Number(locArr[0]), lat: Number(locArr[1]) }
+    : undefined;
 
   return {
     id: id.toString(),
@@ -100,6 +106,8 @@ export const adaptBackendUserToFrontendUser = (backendUser: any): User => {
     isOnline,
     yearsExperience,
     jobsCompleted,
+    locationSource,
+    coords,
     // Keep raw backend for debugging
     _backend: backendUser,
   } as any;

@@ -289,12 +289,14 @@ export const api = {
         headers: {} as any,
       });
     },
-    updateLocation: (lng: number, lat: number, city?: string) =>
+    updateLocation: (lng: number, lat: number, city?: string, source?: 'gps' | 'manual', unpin?: boolean) =>
       apiFetch('/api/users/location', {
         method: 'PATCH',
         // Post-Audit P3: `city` is carried in the SAME request so coordinates + city
         // are always one atomic DB update (single source of truth for matching).
-        body: JSON.stringify(city !== undefined ? { lng, lat, city } : { lng, lat }),
+        // 2026-08-24 work-location pinning: `source: 'manual'` (Profile map picker) pins
+        // the location so drifting GPS can never silently break matching/distances.
+        body: JSON.stringify({ lng, lat, ...(city !== undefined ? { city } : {}), ...(source ? { source } : {}), ...(unpin ? { unpin: true } : {}) }),
       }),
   },
 

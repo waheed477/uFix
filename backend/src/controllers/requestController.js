@@ -192,7 +192,13 @@ const getNearbyRequests = async (req, res) => {
         id: r._id,
         category: r.category,
         description: r.description,
-        location: r.location,
+        // Privacy (2026-08-24): pre-acceptance, providers get AREA-LEVEL coordinates -
+        // snapped to a ~0.004 deg (~400-450m) grid - never the customer's exact doorstep.
+        // Exact coordinates unlock only after offer acceptance (job payload, unchanged).
+        // Distance math impact <= ~0.3 km worst case - visually honest, stalking-proof.
+        location: r.location && r.location.coordinates && r.location.coordinates.length === 2
+          ? { type: 'Point', coordinates: r.location.coordinates.map(v => Math.round(Number(v) / 0.004) * 0.004) }
+          : r.location,
         address: r.address,
         city: r.city,
         status: r.status,

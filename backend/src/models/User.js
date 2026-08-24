@@ -68,6 +68,25 @@ const userSchema = new mongoose.Schema({
       }
     }
   },
+  // Work-location pinning (2026-08-24 Task: provider-set location)
+  // locationSource: whose coordinates does `location` currently represent?
+  //   'gps'    = last device/IP geolocation (default, backwards compatible)
+  //   'manual' = provider pinned their work location on a map in Profile
+  // Manual pin ALWAYS wins: gps patches only refresh `gpsLocation` while a pin exists,
+  // so a drifting/emulator GPS can never silently break city matching + distances again.
+  locationSource: {
+    type: String,
+    enum: ['gps', 'manual'],
+    default: 'gps'
+  },
+  pinnedLocation: {
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: { type: [Number], default: undefined }
+  },
+  gpsLocation: {
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: { type: [Number], default: undefined }
+  },
   isOnline: {
     type: Boolean,
     default: false,

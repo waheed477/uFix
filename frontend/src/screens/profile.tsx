@@ -15,7 +15,8 @@ import {
   ShieldIcon,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import { getCityByName, getAllCities } from "@/lib/location";
+import { getCityByName, getAllCities, getPosition, calculateDistanceKm, PAKISTAN_CITIES } from "@/lib/location";
+import { WorkLocationPicker } from "@/components/WorkLocationPicker";
 
 function MenuItem({
   icon,
@@ -52,6 +53,33 @@ export function ProfileTab() {
   // Optimized: Show user immediately from store (no loading spinner for whole screen)
   // fullProfile fetched in background, cached, non-blocking
   const displayUser = fullProfile || user;
+  // Work-location pinning (2026-08-24 Task): provider pins work spot on a map; manual pin
+  // always wins over drifting GPS (backend enforces). State below drives the UI + refetch.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [workLocBusy, setWorkLocBusy] = useState(false);
+  const [workLocMsg, setWorkLocMsg] = useState<string | null>(null);
+  const [profileVersion, setProfileVersion] = useState(0);
+  const reloadProfile = () => { setFullProfile(null); setProfileVersion((v) => v + 1); };
+  const useLiveGps = async () => {
+    setWorkLocBusy(true);
+    setWorkLocMsg(null);
+    try {
+      const pos = await getPosition();
+      let nearest = PAKISTAN_CITIES[0];
+      let best = Infinity;
+      for (const c of PAKISTAN_CITIES) {
+        const d = calculateDistanceKm(pos.coords.lat, pos.coords.lng, c.lat, c.lng);
+        if (d < best) { best = d; nearest = c; }
+      }
+      await api.users.updateLocation(pos.coords.lng, pos.coords.lat, nearest.name, "gps", true); // explicit unpin - return to GPS control
+      setWorkLocMsg(`📡 Live GPS set - ${nearest.name}${best > 50 ? " (warning: GPS ke sab se qareeb sheher se 50km+ door, check karein)" : ""}`);
+      reloadProfile();
+    } catch (e: any) {
+      setWorkLocMsg(`GPS fail ho gaya: ${e?.message || "permission dein ya map par pin karein"}`);
+    } finally {
+      setWorkLocBusy(false);
+    }
+  };
   // All-time completed-job earnings (TASK 1 - moved here from Provider Home)
   const earnings = jobs.filter((j) => j.status === "completed").reduce((sum, j) => sum + (Number((j.fee ?? "").replace(/[^0-9]/g, "")) || 0), 0);
 
@@ -78,7 +106,7 @@ export function ProfileTab() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [user?.id]); // Only refetch when user id changes
+  }, [user?.id, profileVersion]); // Refetch on user change or explicit reload (work-location save)
 
   if (!displayUser) {
     return (
@@ -187,6 +215,38 @@ export function ProfileTab() {
           </div>
         </div>
 
+        {isProvider && (
+          <div className="rounded-2xl bg-white p-4 shadow-card">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-ink-900">🗺️ Work location</h3>
+              <span className={cn(
+                "rounded-full px-2.5 py-1 text-[11px] font-bold",
+                (fullProfile?.locationSource === "manual")
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-ink-100 text-ink-600"
+              )}>
+                {fullProfile?.locationSource === "manual" ? "📌 Pinned by you" : "📡 Live GPS (auto)"}
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs text-ink-500">
+              Customer ko dikhne wali distance isi point se calculate hoti hai.
+              {fullProfile?.locationSource === "manual"
+                ? " GPS ghalt ho to bhi aap ka pinned location use hota hai."
+                : " GPS ghalat hai? Map par apni exact location pin karein - pin hamesha GPS par win karti hai."}
+            </p>
+            {fullProfile?.location?.coordinates && fullProfile.location.coordinates.length === 2 && (
+              <p className="mt-1.5 text-[11px] font-mono text-ink-400">
+                {displayCity} · {Number(fullProfile.location.coordinates[1]).toFixed(5)}, {Number(fullProfile.location.coordinates[0]).toFixed(5)}
+              </p>
+            )}
+            {workLocMsg && <p className="mt-2 rounded-xl bg-brand-50 px-3 py-2 text-[11px] font-semibold text-brand-700">{workLocMsg}</p>}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button variant="primary" size="md" onClick={() => setPickerOpen(true)}>📌 Set on map</Button>
+              <Button variant="outline" size="md" onClick={useLiveGps} disabled={workLocBusy}>{workLocBusy ? "GPS…" : "📡 Use live GPS"}</Button>
+            </div>
+          </div>
+        )}
+
         {isProvider && meta && (
           <div className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-card">
             <CategoryIcon category={meta.id} size={44} />
@@ -220,6 +280,20 @@ export function ProfileTab() {
         </button>
 
         <p className="pb-2 text-center text-[11px] text-ink-400">uFix · v1.0 · {displayCity} · 35 Pakistan cities · Fast profile</p>
+        {pickerOpen && (
+          <WorkLocationPicker
+            initialCity={displayCity}
+            initialCoords={fullProfile?.location?.coordinates && fullProfile.location.coordinates.length === 2
+              ? { lng: Number(fullProfile.location.coordinates[0]), lat: Number(fullProfile.location.coordinates[1]) }
+              : undefined}
+            onSaved={({ city: savedCity }) => {
+              setPickerOpen(false);
+              setWorkLocMsg(`📌 Pinned in ${savedCity} - ab distances yahi se calculate hongi (GPS ghalat ho to bhi)`);
+              reloadProfile();
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
       </div>
     </div>
   );

@@ -34,6 +34,8 @@ const getOwnProfile = async (req, res) => {
         city: user.city,
         profilePicture: user.profilePicture,
         location: user.location,
+        locationSource: (user.locationSource || 'gps'),
+        pinnedLocation: user.pinnedLocation,
         isOnline: user.isOnline,
         isVerified: user.isVerified,
         category: user.category,
@@ -329,20 +331,19 @@ const updateLocation = async (req, res) => {
       });
     }
 
-    const $set = {
-      location: {
-        type: 'Point',
-        coordinates: [parsedLng, parsedLat] // IMPORTANT: [lng, lat]
-      }
-    };
-    if (city !== undefined) $set.city = city.trim();
+    // Work-location pinning (2026-08-24): body.source
+    //   'manual' -> provider pinned on the map in Profile: location + city come from the
+    //               PIN and are locked in (locationSource='manual', pinnedLocation stored).
+    //   'gps'/absent -> device/IP geolocation. If a manual pin exists, DON'T overwrite
+    //               `location`/`city` (a drifting/emulator GPS must not hijack matching);
+    //               just record it in gpsLocation. Otherwise behaves exactly as before.
+    const source = req.body.source === 'manual' ? 'manual' : 'gps';
+    // Explicit "Use my live GPS" (Profile button) sends unpin:true - the ONLY way back from a
+    // manual pin to GPS control. Silent background GPS syncs must NEVER clear a pin by accident.
+    const explicitUnpin = req.body.unpin === true;
+    const gpsPoint = { type: 'Point', coordinates: [parsedLng, parsedLat] }; // [lng, lat]
 
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      { $set },
-      { new: true, runValidators: true }
-    ).select('-__v');
-
+    const user = await User.findById(req.user.id).select('-__v');
     if (!user) {
       return res.status(404).json({
         status: 'error',
@@ -350,9 +351,30 @@ const updateLocation = async (req, res) => {
       });
     }
 
+    let pinPreserved = false;
+    if (source === 'manual') {
+      user.location = gpsPoint;
+      user.pinnedLocation = gpsPoint;
+      user.locationSource = 'manual';
+      if (city !== undefined) user.city = city.trim();
+    } else {
+      user.gpsLocation = gpsPoint;
+      if (!explicitUnpin && user.locationSource === 'manual' && user.pinnedLocation && user.pinnedLocation.coordinates && user.pinnedLocation.coordinates.length === 2) {
+        pinPreserved = true; // pin keeps location + city; nothing else to set
+      } else {
+        if (explicitUnpin) { user.pinnedLocation = undefined; }
+        user.location = gpsPoint;
+        user.locationSource = 'gps';
+        if (city !== undefined) user.city = city.trim();
+      }
+    }
+    await user.save();
+
     return res.status(200).json({
       status: 'success',
-      message: 'Location updated successfully',
+      message: pinPreserved
+        ? 'GPS recorded, but your pinned work location stays active (pinned location always wins)'
+        : 'Location updated successfully',
       location: {
         type: user.location.type,
         coordinates: user.location.coordinates, // [lng, lat]
@@ -362,11 +384,14 @@ const updateLocation = async (req, res) => {
         },
         note: 'Stored as GeoJSON [lng, lat] - frontend {lat,lng} converted correctly'
       },
+      locationSource: user.locationSource,
+      pinPreserved,
       user: {
         id: user._id,
         name: user.name,
         city: user.city,
-        location: user.location
+        location: user.location,
+        locationSource: user.locationSource
       }
     });
 

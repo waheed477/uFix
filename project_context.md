@@ -729,6 +729,57 @@ build 512.24 kB; tsc errors 24 (< pre-existing 26 baseline - no new ones).
 **Verification:** audit suite `ui-polish-audit.js` **30/30** (S1–S21 static + L1–L5b live); full battery `tests/run.sh` **392/392 ALL GREEN**
 on fresh server; frontend build clean (511.38 kB); tsc error count unchanged from baseline.
 
+## ✅ Work-Location Pinning + Location Privacy (2026-08-24, session 3 - screenshot-reported bug)
+
+**Reported bug:** provider Home cards all read "Distance unavailable". Diagnosis: provider city =
+Gujranwala but the device/emulator GPS reported ~Okara (73.03E/31.37N, ~180km off); the 50km
+plausibility cap (prior task) then honestly hid every distance. Root cause = distances depended
+100% on possibly-lying GPS. User-commissioned fix plan (approved combo executed):
+
+### P1 - Provider pins work location on a REAL map (Profile)
+- New `frontend/src/components/WorkLocationPicker.tsx`: Leaflet 1.9.4 + FREE OpenStreetMap tiles
+  (no API key, no Google), canonical Pakistani-city dropdown (same PAKISTAN_CITIES source, so the
+  stored city string can never mismatch the request fan-out filter), tap-to-pin + draggable pin.
+- Profile (provider only) "**🗺️ Work location**" card: source chip
+  `📌 Pinned by you` / `📡 Live GPS (auto)`, current city+coords, buttons **Set on map** and
+  **Use my live GPS** (nearest-canonical-city auto-pick for the city string).
+- Backend: User model gains `locationSource: 'gps'|'manual'` + `pinnedLocation` + `gpsLocation`;
+  `PATCH /api/users/location` accepts `source` + explicit `unpin:true`.
+  **Manual pin ALWAYS WINS**: while pinned, GPS patches (silent background syncs included) only
+  fill `gpsLocation`; `location`/`city` stay pinned. The ONLY way back to GPS control is the
+  explicit `unpin:true` from "Use my live GPS". Existing callers (BUG A city-override flows)
+  send no `source` -> default 'gps' -> unchanged behavior (guard tests green).
+
+### P2 - Diagnostics visible to the provider (no more silent "unavailable")
+- Provider Home amber banner when live GPS is 50km+ from the matching city:
+  "Aap ka GPS {city} se ~N km door lag raha hai" + one-tap **setTab("profile")** button.
+- Distance math uses the PIN first when `locationSource==='manual'`
+  (`pinnedCoords || liveCoords || location.coords`) - pinned providers see honest distances
+  even with a dead/emulated GPS.
+
+### P3 - Customer location privacy, Uber/Careem-style escalation
+- PRE-acceptance: `/api/requests/nearby` snaps request coords to a ~0.004° (~400-450m) grid.
+  Provider sees area-level ("Satellite Town"), never the exact doorstep (stalking-proof; the
+  API itself no longer leaks exact house coords). Distance drift from snapping <= ~0.3km.
+- POST-acceptance: job payload carries the EXACT coordinates, unchanged (live map + tel:).
+  Proven live (L9 exact match post-accept).
+
+### Verification
+- New suite `backend/tests/work-location.js` **17/17** (S1-S7 statics incl. privacy-grid +
+  picker/pin-priority guards; L1-L10 live: screenshot-state reproduction, pin save, pin survives
+  hostile GPS+city patch, nearby works off pin, snapped-not-exact pre-acceptance, <=0.4km distance
+  drift, exact coords post-acceptance, explicit unpin path). Registered in tests/run.sh (20 suites).
+- **Full battery 409/409 ALL GREEN** on fresh dev-inmemory server (incl. BUG A/B guards).
+  Frontend build clean (686.67 kB; +175kB leaflet+css), tsc errors 26 = baseline (0 new).
+
+### Bundle/preview note
+- OSM tiles need network at runtime (production fine, sandbox preview shows grey grid but the
+  picker still works - coordinates/dragging are fully client-side).
+
+### Still flagged for review (unchanged from prior session, owner decision pending)
+greeting/📍city redundancy, static chat "Online now" pill, "Order history" counts active jobs,
+SoundPreview dev panel still bundled.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -748,6 +799,7 @@ on fresh server; frontend build clean (511.38 kB); tsc error count unchanged fro
 - [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
 - [x] Distance UX: one shared DistanceDisplay (pin + X.X km + ~N min, 18 km/h ETA assumption), live on provider cards/ActiveJob, accurate backend-computed SNAPSHOT on offer cards (privacy-safe), offers sort Newest/Nearest/Cheapest + provider nearest-first default + ⚡ Closest badge - 351/351 green (2026-08-23)
 - [x] Chat duplicate fix (optimistic temp + self-echo reconciliation via chatMerge helper, exactly-one both sides live incl. rapid sends) + CUSTOMER-ONLY ratings (403 CUSTOMER_ONLY_RATING, provider clean completion confirmation, new_rating provider-only) + new-request/booking tones replaced (knock + cha-ching defaults; notification tone untouched) - 362/362 green (2026-08-23)
+- [x] Work-location pinning (manual>gps priority, explicit unpin) + Leaflet/OSM map picker + GPS-mismatch banner + pre-acceptance privacy grid / exact post-accept (work-location.js 17/17) - 409/409 green (2026-08-24)
 - [x] Provider Home stats->Profile move + unprofessional-UI audit (DEV OTP gate, aria-labels, honest copy, rating format, PLACEHOLDER guard, long-text contracts) - 392/392 green (2026-08-24)
 - [x] Screenshot polish pass: distance honesty (unavailable state + 50km plausibility cap, zero fake fallbacks, single ETA source per card), Socket.io jargon removed, raw GPS -> city label (coords DEV-gated), one rating format (RatingSummary, fake 4.8s gone), labeled Decline + inline confirm, Cancel chip button, full dead-end audit (dead Earnings/Settings menu items removed; providers/available deterministic sort) - 380/380 green (2026-08-24)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent

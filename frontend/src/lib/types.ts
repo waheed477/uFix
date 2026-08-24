@@ -4,6 +4,7 @@
  * All data comes from real backend API + Socket.io
  */
 
+import type { Coords } from "@/lib/location";
 export type Role = "customer" | "provider";
 export type Category = "plumber" | "electrician" | "mechanic";
 
@@ -35,6 +36,10 @@ export interface User {
   reviews: number;
   category?: Category;
   radiusKm?: number;
+  // Work-location pinning (2026-08-24): 'manual' = pinned on map in Profile (always wins over GPS)
+  locationSource?: 'gps' | 'manual';
+  // Effective stored work coordinates (GeoJSON [lng,lat] unwrapped) - set when known
+  coords?: Coords;
   verified?: boolean;
   isOnline?: boolean;
   yearsExperience?: number;
