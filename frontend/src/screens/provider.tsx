@@ -18,7 +18,6 @@ import { calculateDistanceKm, watchPosition, clearWatch, type Coords } from "@/l
 import { playNewRequestTone } from "@/lib/sound";
 import {
   Avatar,
-  BanknoteIcon,
   BriefcaseIcon,
   Button,
   CategoryIcon,
@@ -258,7 +257,7 @@ export function ProviderHome() {
   const [liveCoords, setLiveCoords] = useState<Coords | null>(null);
   const watchIdRef = useRef<number | null>(null);
 
-  const earnings = jobs.filter((j) => j.status === "completed").reduce((sum, j) => sum + (Number((j.fee ?? "").replace(/[^0-9]/g, "")) || 0), 0);
+
 
   // Distance UX (2026-08-23): provider list defaults to NEAREST FIRST, using the same live
   // Haversine the cards show (falls back to the request's snapshot distanceKm). No backend
@@ -360,7 +359,7 @@ export function ProviderHome() {
 
   return (
     <div className="flex h-full flex-col bg-ink-50">
-      <div className="space-y-3 p-4">
+      <div className="space-y-2.5 p-4 pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Avatar initials={user?.avatar ?? "?"} color={user?.color ?? "#167a6c"} size={46} online={online} />
@@ -409,21 +408,8 @@ export function ProviderHome() {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-2.5">
-          {[
-            { label: "Today's earnings", value: `PKR ${earnings}`, icon: <BanknoteIcon className="h-4 w-4" /> },
-            { label: "Jobs done", value: `${user?.jobsCompleted ?? 0}`, icon: <BriefcaseIcon className="h-4 w-4" /> },
-            { label: "Rating", value: user?.reviews ? `${(user?.rating ?? 0).toFixed(1)}★ · ${user.reviews}` : "No ratings", icon: <Stars value={user?.rating ?? 0} size={12} /> },
-          ].map((s, i) => (
-            <div key={i} className="rounded-2xl bg-white p-2.5 shadow-card">
-              <div className="mb-1 flex items-center gap-1.5 text-ink-400">{s.icon}</div>
-              <p className="font-display text-base font-extrabold text-ink-900">{s.value}</p>
-              <p className="text-[11px] font-medium text-ink-500">{s.label}</p>
-            </div>
-          ))}
-        </div>
-
-
+        {/* TASK 1 (2026-08-24): the earnings/jobs/rating stats row MOVED to Profile so the
+            incoming-requests list gets maximum above-the-fold space on mobile. */}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">

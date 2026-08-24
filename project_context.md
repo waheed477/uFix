@@ -687,6 +687,48 @@ updated in distance-ux S4 / provider-home-and-price S6 / offers-visibility S3 / 
 offer-withdraw S4 (all assert the NEW clean forms); full battery **380/380 green** on fresh server;
 build 512.24 kB; tsc errors 24 (< pre-existing 26 baseline - no new ones).
 
+## ✅ Provider Home stats-card move + Unprofessional-UI audit (2026-08-24, session 2)
+
+### Task 1 — Stats move (DONE)
+- **Removed** the earnings/jobs/rating triplet from Provider Home (`screens/provider.tsx`); top section is now
+  compact `space-y-2.5 p-4 pb-3` (greeting + online toggle only). Unused `earnings` const + `BanknoteIcon` import removed.
+- **Added to Provider Profile** (`screens/profile.tsx`): consolidated ONE triplet —
+  `[Earnings (all-time, honest label "Earnings" sub-label "all time") | Jobs done | Rating X.X or "—"]` for providers,
+  `[Rating | Reviews | Jobs]` for customers. Earnings derived from store jobs (same formula as before).
+  Fixed `undefined★` / `0★` artifacts: rating cell now shows formatted value only when > 0, else an honest "—".
+- **Above-the-fold math** (378×700 viewport): greeting ≈46px + padding ≈28px + online card ≈72px ⇒ list starts ≈146px;
+  with ~64px tab bar, ≈490px remains — a full request card (~230px) + change is visible WITHOUT scrolling.
+  Locked by S15a–d static checks.
+
+### Task 2 — Audit: FOUND & FIXED
+| # | Severity | Issue | Fix |
+|---|----------|-------|-----|
+| 1 | Med | Dev OTP echo box visible to all users on onboarding (test artifact) | Gated `import.meta.env.DEV && debugOtp` (prod build hides it) |
+| 2 | Low-Med | 8 icon-only back buttons without accessible names (customer/jobs/profile/SoundPreview) | `aria-label="Go back"` on all 8 |
+| 3 | Low-Med | Chat send button + phone call links icon-only unnamed | `aria-label="Send message"` / `aria-label="Call"` |
+| 4 | Low | Chat header claimed "Online now - real-time" with no presence check behind it | Copy now honest "Online now" |
+| 5 | Low | ActiveJob peer rating could render `4.833333★` (raw float) | `peerRating.toFixed(1)` |
+| 6 | — | Suite process-integrity: my own edit tool left a `<PLACEHOLDER_H1` fragment in chat JSX | Repaired + **S21 guard** (no PLACEHOLDER markers may exist in any screen source) |
+
+### Task 2 — Verified CLEAN (found, no change needed)
+- STATUS map has friendly labels for every status (no raw enums in UI); currency uniformly `PKR N`; ratings uniformly `X.X`.
+- Truncation already present: RequestCard description `line-clamp-2`, customerName `truncate`; OfferCard providerName `truncate`; ActiveJob peerName `truncate` (locked by S20 + L5 live 180-char desc/45-char name probe; L5b asserts >50-char names are REJECTED by validated schema, not stored).
+- Empty/loading/error(+retry) states exist for offers, available providers, jobs, history, chat, notifications, rating.
+- MyOfferCard withdraw/dismiss buttons are labeled; no dead-end buttons (S12–S14 audit + earlier dead-end sweep).
+
+### ⚠️ FLAGGED FOR REVIEW (intentionally NOT changed — need owner decision)
+1. **Greeting + "📍 city" chip redundancy** on Provider Home — the greeting block and the location chip both show the city; removing one is a design choice.
+2. **"Online now" pill in chat is static** — it always renders when a peer exists; there is no live presence/subscription check behind it. Either wire presence or reword (copy already made honest).
+3. **Profile "Order history" metric `${jobs.length} jobs`** counts ACTIVE jobs too, not only completed history entries; label-or-count semantics unclear.
+4. **SoundPreview dev panel ships in the app** (DEV-gated UI but code remains in bundle) — remove or tree-shake from production builds before release.
+
+### Stale-check repair (this session)
+- `notification-view-count.js` L2 expected the removed stats triplet → updated to assert the NEW layout (slim top, no stats on Home).
+- `e2e-availability-expiry.js` A6 hardened into an honest-contract assertion (on page OR page genuinely full at top-20 ranking) — see existing harness note below.
+
+**Verification:** audit suite `ui-polish-audit.js` **30/30** (S1–S21 static + L1–L5b live); full battery `tests/run.sh` **392/392 ALL GREEN**
+on fresh server; frontend build clean (511.38 kB); tsc error count unchanged from baseline.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -706,6 +748,7 @@ build 512.24 kB; tsc errors 24 (< pre-existing 26 baseline - no new ones).
 - [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
 - [x] Distance UX: one shared DistanceDisplay (pin + X.X km + ~N min, 18 km/h ETA assumption), live on provider cards/ActiveJob, accurate backend-computed SNAPSHOT on offer cards (privacy-safe), offers sort Newest/Nearest/Cheapest + provider nearest-first default + ⚡ Closest badge - 351/351 green (2026-08-23)
 - [x] Chat duplicate fix (optimistic temp + self-echo reconciliation via chatMerge helper, exactly-one both sides live incl. rapid sends) + CUSTOMER-ONLY ratings (403 CUSTOMER_ONLY_RATING, provider clean completion confirmation, new_rating provider-only) + new-request/booking tones replaced (knock + cha-ching defaults; notification tone untouched) - 362/362 green (2026-08-23)
+- [x] Provider Home stats->Profile move + unprofessional-UI audit (DEV OTP gate, aria-labels, honest copy, rating format, PLACEHOLDER guard, long-text contracts) - 392/392 green (2026-08-24)
 - [x] Screenshot polish pass: distance honesty (unavailable state + 50km plausibility cap, zero fake fallbacks, single ETA source per card), Socket.io jargon removed, raw GPS -> city label (coords DEV-gated), one rating format (RatingSummary, fake 4.8s gone), labeled Decline + inline confirm, Cancel chip button, full dead-end audit (dead Earnings/Settings menu items removed; providers/available deterministic sort) - 380/380 green (2026-08-24)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix

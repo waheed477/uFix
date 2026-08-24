@@ -52,6 +52,8 @@ export function ProfileTab() {
   // Optimized: Show user immediately from store (no loading spinner for whole screen)
   // fullProfile fetched in background, cached, non-blocking
   const displayUser = fullProfile || user;
+  // All-time completed-job earnings (TASK 1 - moved here from Provider Home)
+  const earnings = jobs.filter((j) => j.status === "completed").reduce((sum, j) => sum + (Number((j.fee ?? "").replace(/[^0-9]/g, "")) || 0), 0);
 
   // Fetch full profile optimized: only once, background, with cache
   useEffect(() => {
@@ -148,12 +150,20 @@ export function ProfileTab() {
             </div>
           </div>
 
+          {/* TASK 1 (2026-08-24): the provider stats that USED to live on Provider Home now
+              live here, consolidated into ONE clean section (no duplicate elsewhere). Earnings
+              = all-time completed-job fees (label was "Today" on Home but math was all-time -
+              renamed honestly). Customer keeps their own triplet (no earnings). */}
           <div className="relative mt-5 grid grid-cols-3 gap-3 border-t border-white/15 pt-4">
-            {[
-              { label: "Rating", value: `${displayUser.rating}★` },
-              { label: "Reviews", value: `${displayUser.reviews}` },
-              { label: isProvider ? "Jobs done" : "Jobs", value: isProvider ? `${displayUser.jobsCompleted ?? 0}` : `${completed}` },
-            ].map((s, i) => (
+            {(isProvider ? [
+              { label: "Earnings", value: `PKR ${earnings}` },
+              { label: "Jobs done", value: `${displayUser.jobsCompleted ?? 0}` },
+              { label: "Rating", value: displayUser.reviews ? `${(displayUser.rating ?? 0).toFixed(1)}★` : "—" },
+            ] : [
+              { label: "Rating", value: displayUser.reviews ? `${(displayUser.rating ?? 0).toFixed(1)}★` : "—" },
+              { label: "Reviews", value: `${displayUser.reviews ?? 0}` },
+              { label: "Jobs", value: `${completed}` },
+            ]).map((s, i) => (
               <div key={i}>
                 <p className="font-display text-lg font-extrabold">{s.value}</p>
                 <p className="text-[11px] text-white/60">{s.label}</p>
@@ -228,7 +238,7 @@ export function EditProfileScreen() {
   return (
     <div className="flex h-full flex-col bg-ink-50">
       <header className="flex items-center gap-3 bg-white px-4 py-3.5 shadow-sm">
-        <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100">
+        <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100">
           <ChevronLeftIcon className="h-5 w-5" />
         </button>
         <h1 className="flex-1 font-display text-lg font-bold text-ink-900">Edit profile</h1>

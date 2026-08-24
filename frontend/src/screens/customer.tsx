@@ -206,7 +206,7 @@ export function NewRequest() {
   return (
     <div className="flex h-full flex-col bg-ink-50">
       <header className="flex items-center gap-3 bg-white px-4 py-3.5 shadow-sm">
-        <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95"><ChevronLeftIcon className="h-5 w-5" /></button>
+        <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95"><ChevronLeftIcon className="h-5 w-5" /></button>
         <div className="flex-1"><h1 className="font-display text-lg font-bold text-ink-900">New request</h1><p className="text-xs text-ink-500">Service in {location.city} · {address.substring(0,30)}</p></div>
         <CategoryIcon category={category} size={38} />
       </header>
@@ -375,7 +375,7 @@ export function OffersScreen() {
     return (
       <div className="flex h-full flex-col bg-ink-50">
         <header className="flex items-center gap-3 bg-white px-4 py-3.5 shadow-sm">
-          <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
+          <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
           <h1 className="font-display text-lg font-bold text-ink-900">Offers</h1>
         </header>
         {latestExpired ? (
@@ -413,7 +413,7 @@ export function OffersScreen() {
     <div className="flex h-full flex-col bg-ink-50">
       <header className="bg-white px-4 py-3.5 shadow-sm">
         <div className="flex items-center gap-3">
-          <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
+          <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
           <div className="flex-1"><h1 className="font-display text-lg font-bold text-ink-900">Incoming offers</h1><p className="text-xs text-ink-500">{location.city} · {offers.length} offers · Live</p></div>
           <CategoryIcon category={request.category} size={38} />
         </div>
@@ -509,7 +509,7 @@ export function AvailableProvidersScreen() {
     return (
       <div className="flex h-full flex-col bg-ink-50">
         <header className="flex items-center gap-3 bg-white px-4 py-3.5 shadow-sm">
-          <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
+          <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
           <h1 className="font-display text-lg font-bold text-ink-900">Available Providers</h1>
         </header>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -526,7 +526,7 @@ export function AvailableProvidersScreen() {
     <div className="flex h-full flex-col bg-ink-50">
       <header className="bg-white px-4 py-3.5 shadow-sm">
         <div className="flex items-center gap-3">
-          <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
+          <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100"><ChevronLeftIcon className="h-5 w-5" /></button>
           <div className="flex-1">
             <h1 className="font-display text-lg font-bold text-ink-900">Providers in {location.city}</h1>
             <p className="text-xs text-ink-500">{providers.length} {request.category} online • Direct booking with price from profile</p>

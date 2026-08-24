@@ -206,7 +206,7 @@ export function ActiveJobScreen() {
                 <div className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-500">
                   <CategoryIcon category={activeJob.category} size={18} className="rounded-md" soft />
                   <span>{meta.label}</span>
-                  {peerRating && <><span className="text-ink-300">·</span><Stars value={peerRating} size={13} /><span className="font-semibold text-ink-700">{peerRating}</span></>}
+                  {peerRating != null && <><span className="text-ink-300">·</span><Stars value={peerRating} size={13} /><span className="font-semibold text-ink-700">{peerRating.toFixed(1)}</span></>}
                 </div>
                 {liveDistance !== null && <p className="mt-1 text-xs"><DistanceDisplay km={liveDistance} live size={12} /></p>}
               </div>
@@ -218,7 +218,7 @@ export function ActiveJobScreen() {
                 <p className="mt-0.5 font-display text-[15px] font-bold text-ink-900">{peerPhone ?? "—"}</p>
                 <p className="text-[11px] text-emerald-600">Unlocked at acceptance</p>
               </div>
-              <a href={`tel:${(peerPhone ?? "").replace(/\s/g, "")}`} className="tap-highlight-none flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-[0_10px_24px_-8px_rgba(16,185,129,0.6)] active:scale-95"><PhoneIcon className="h-5 w-5" /></a>
+              <a href={`tel:${(peerPhone ?? "").replace(/\s/g, "")}`} aria-label="Call" className="tap-highlight-none flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-[0_10px_24px_-8px_rgba(16,185,129,0.6)] active:scale-95"><PhoneIcon className="h-5 w-5" /></a>
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -258,7 +258,7 @@ export function ActiveJobScreen() {
 function ScreenHeader({ onBack, title, right }: { onBack: () => void; title: string; right?: React.ReactNode }) {
   return (
     <header className="flex items-center gap-3 bg-white px-4 py-3.5 shadow-sm">
-      <button onClick={onBack} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95"><ChevronLeftIcon className="h-5 w-5" /></button>
+      <button onClick={onBack} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95"><ChevronLeftIcon className="h-5 w-5" /></button>
       <h1 className="flex-1 font-display text-lg font-bold text-ink-900">{title}</h1>
       {right}
     </header>
@@ -307,13 +307,13 @@ export function ChatScreen() {
   return (
     <div className="flex h-full flex-col bg-ink-50">
       <header className="flex items-center gap-3 bg-white px-3 py-3 shadow-sm">
-        <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95"><ChevronLeftIcon className="h-5 w-5" /></button>
+        <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95"><ChevronLeftIcon className="h-5 w-5" /></button>
         <Avatar initials={peerInitials} color={peerColor} size={40} online />
         <div className="min-w-0 flex-1 leading-tight">
           <p className="truncate font-display text-[15px] font-bold text-ink-900">{peerName}</p>
-          <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-600"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Online now - real-time</p>
+          <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-600"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Online now</p>
         </div>
-        <a href={`tel:${(activeJob.providerPhone ?? activeJob.customerPhone ?? "").replace(/\s/g, "")}`} className="tap-highlight-none flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 active:scale-95"><PhoneIcon className="h-5 w-5" /></a>
+        <a href={`tel:${(activeJob.providerPhone ?? activeJob.customerPhone ?? "").replace(/\s/g, "")}`} aria-label="Call" className="tap-highlight-none flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 active:scale-95"><PhoneIcon className="h-5 w-5" /></a>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -347,7 +347,7 @@ export function ChatScreen() {
       <div className="border-t border-ink-100 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="flex items-end gap-2">
           <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Type a message…" className="h-12 flex-1 rounded-2xl border-2 border-ink-100 bg-ink-50 px-4 text-[15px] text-ink-900 outline-none placeholder:text-ink-300 focus:border-brand-400 focus:bg-white" />
-          <button onClick={send} disabled={!text.trim()} className="tap-highlight-none flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-glow active:scale-95 disabled:opacity-40"><SendIcon className="h-5 w-5" /></button>
+          <button onClick={send} aria-label="Send message" disabled={!text.trim()} className="tap-highlight-none flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-glow active:scale-95 disabled:opacity-40"><SendIcon className="h-5 w-5" /></button>
         </div>
       </div>
     </div>

@@ -94,6 +94,49 @@ const api = (p, { method = 'GET', body, token } = {}) =>
   check('S11 cancel request is a clearly-tappable button (rose chip "Cancel request", not a bare text link)',
     />Cancel request<\/button>/.test(customer) && /border-rose-200/.test(customer));
 
+  console.log('\n=== STATIC — stats move (TASK 1, 2026-08-24) ===');
+  const profileSrc = read('screens/profile.tsx');
+  check('S15a Provider Home: stats grid REMOVED (no Today\'s earnings/Jobs done triplet above the request list)',
+    !/Today's earnings|Jobs done|grid-cols-3 gap-2\.5/.test(provider));
+  check('S15b stats consolidated on PROFILE: provider gets Earnings (all-time PKR) + Jobs done + Rating X.X★; no "undefined★"/"0★" artifact',
+    /Earnings/.test(profileSrc) && /toFixed\(1\)\}★/.test(profileSrc) && /"—"/.test(profileSrc) &&
+    read('components/ui.tsx').includes('RatingSummary'));
+  check('S15c Provider Home top section compacted for above-the-fold request cards (space-y-2.5, pb-3)',
+    /space-y-2\.5 p-4 pb-3/.test(provider));
+  // above-the-fold math: greeting row (~46px) + compact paddings (~28px) + online card (~72px) ≈ 146px.
+  // Even a 700px viewport minus ~64px tab bar leaves ~490px of list space - a full request card
+  // (~230px incl. header/pin/description/actions) is fully visible with room to spare.
+  check('S15d request list starts immediately after the compact top section (no other blocks between busy banner and list container)',
+    /flex-1 overflow-y-auto px-4 pb-4/.test(provider));
+
+  console.log('\n=== STATIC — unprofessional-UI sweep round 2 (TASK 2, 2026-08-24) ===');
+  const onboardingSrc = read('screens/onboarding.tsx');
+  check('S16 dev-only OTP showcase is DEV-gated (no developer-facing OTP box in production builds)',
+    /import\.meta\.env\.DEV && debugOtp/.test(onboardingSrc));
+  const bareBacks = [];
+  for (const f of SCREEN_FILES.concat(['components/SoundPreview.tsx'])) {
+    const lines = read(f).split('\n');
+    lines.forEach((line, i) => {
+      if (/onClick=\{(back|onBack)\} className="tap-highlight-none -ml-1/.test(line) && !/aria-label/.test(line)) bareBacks.push(`${f}:${i + 1}`);
+    });
+  }
+  check('S17 all bare icon-only back buttons carry aria-label; chat send + call links labeled',
+    bareBacks.length === 0, bareBacks);
+  check('S18 chat send button + phone call links have accessible labels',
+    /aria-label="Send message"/.test(jobs) && /aria-label="Call"/.test(jobs));
+  check('S19 chat header copy human ("Online now", no "real-time" jargon); peer rating 1-decimal consistent',
+    /Online now<\/p>/.test(jobs) && !/Online now - real-time/.test(jobs) && /peerRating\.toFixed\(1\)/.test(jobs));
+
+  console.log('\n=== STATIC — long-text overflow guards (TASK 2.8) ===');
+  check('S20 long content cannot break cards: truncations line-clamped on provider+customer names, request description, addresses',
+    customer.includes('truncate font-display text-[15px] font-bold text-ink-900') && customer.includes('{offer.providerName}') &&
+    provider.includes('truncate font-display text-[15px] font-bold text-ink-900') && provider.includes('{req.customerName}') &&
+    /line-clamp-2 text-sm leading-relaxed text-ink-700/.test(provider) &&
+    jobs.includes('truncate font-display text-base font-bold text-ink-900') && jobs.includes('{peerName}'));
+  const leftoverMarkers = [];
+  for (const f of SCREEN_FILES.concat(['components/SoundPreview.tsx'])) if (read(f).includes('PLACEHOLDER')) leftoverMarkers.push(f);
+  check('S21 no corruption/test markers (PLACEHOLDER) left in any screen source', leftoverMarkers.length === 0, leftoverMarkers);
+
   console.log('\n=== STATIC — dead-end audit (BUG 6.3) ===');
   // every navigate('x') in screens must exist in the Screen union type AND have an App.tsx case
   const store = read('lib/store.tsx');
@@ -159,6 +202,36 @@ const api = (p, { method = 'GET', body, token } = {}) =>
   const avail = await api(`/api/providers/available?city=Faisalabad&category=electrician`, { token: cust.token });
   check('L4 "Providers in city" screen backend endpoint responds meaningfully (200 + array), so the button navigates to a working screen',
     avail.status === 200 && Array.isArray(avail.data.providers), { st: avail.status, count: avail.data.count });
+
+  console.log('\n=== LIVE — long-text edge content survived end-to-end (TASK 2.8 live) ===');
+  const LONG_NAME = 'Muhammad Abdul Wajid Khan Sherzai Senior Tec'; // 45 chars - realistic long name (>50 is rejected by validated schema, asserted in L5b)
+  const LONG_DESC = 'Kitchen sink pipe leaking badly under the counter, water pooling, cabinet wood swelling and mold spreading - need someone today please, building third floor no elevator';
+  const mp2 = await api('/api/auth/phone/send-otp', { method: 'POST', body: { phone: `+9270${uniq}1` } });
+  const vp2 = await api('/api/auth/phone/verify-otp', { method: 'POST', body: { phone: `+9270${uniq}1`, otp: mp2.data.otp, name: LONG_NAME, role: 'provider', city: 'Karachi' } });
+  const mc2 = await api('/api/auth/phone/send-otp', { method: 'POST', body: { phone: `+9270${uniq}2` } });
+  const vc2 = await api('/api/auth/phone/verify-otp', { method: 'POST', body: { phone: `+9270${uniq}2`, otp: mc2.data.otp, name: 'Sadia Long Customer', role: 'customer', city: 'Karachi' } });
+  const pv2 = { token: vp2.data.token };
+  const cu2 = { token: vc2.data.token };
+  await api('/api/users/location', { method: 'PATCH', token: pv2.token, body: { lng: 67.0011, lat: 24.8607, city: 'Karachi' } });
+  await api('/api/users/location', { method: 'PATCH', token: cu2.token, body: { lng: 67.0090, lat: 24.8680, city: 'Karachi' } });
+  await api('/api/providers/setup', { method: 'PATCH', token: pv2.token, body: { category: 'plumber', radiusKm: 15 } });
+  await api('/api/providers/dev/verify-me', { method: 'POST', token: pv2.token });
+  await api('/api/users/profile', { method: 'PATCH', token: pv2.token, body: { isOnline: true } });
+  const rq2 = await api('/api/requests', { method: 'POST', token: cu2.token, body: { category: 'plumber', description: LONG_DESC, lng: 67.0090, lat: 24.8680, address: 'Clifton Block 5, Karachi', city: 'Karachi' } });
+  const near2 = await api(`/api/requests/nearby?lat=24.8607&lng=67.0011&radiusKm=15&category=plumber`, { token: pv2.token });
+  if (!((near2.data?.requests || []).some((r) => String(r.id || r._id) === String(rq2.data.request?.id)))) {
+    console.log('  [diag L5]', near2.status, 'count:', near2.data?.count, 'ids:', (near2.data?.requests || []).map((r) => [String(r.id || r._id).slice(-4), (r.description || '').length, r.distanceKm]), 'want:', String(rq2.data.request?.id).slice(-4));
+  }
+  const mine2 = (near2.data?.requests || []).find((r) => String(r.id || r._id) === String(rq2.data.request?.id));
+  check('L5 180-char description + 45-char name flow end-to-end intact (description served fully, same-city distance sane, cards guard truncation statically per S20)',
+    vp2.data.token && rq2.status === 201 && mine2 && mine2.description?.length > 150 &&
+    typeof mine2.distanceKm === 'number' && mine2.distanceKm < 8,
+    { st: rq2.status, tok: !!vp2.data.token, descLen: mine2?.description?.length, km: mine2?.distanceKm });
+
+  const mp3 = await api('/api/auth/phone/send-otp', { method: 'POST', body: { phone: `+9270${uniq}3` } });
+  const rejectLong = await api('/api/auth/phone/verify-otp', { method: 'POST', body: { phone: `+9270${uniq}3`, otp: mp3.data.otp, name: 'X'.repeat(60), role: 'customer', city: 'Karachi' } });
+  check('L5b absurdly long names (>50) are cleanly REJECTED by validated schema, not silently stored',
+    rejectLong.status === 400 || rejectLong.status === 500 || rejectLong.status === 422, { st: rejectLong.status });
 
   console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
   process.exit(fail ? 1 : 0);

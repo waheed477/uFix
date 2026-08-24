@@ -207,7 +207,12 @@ async function main() {
   // A6 - available providers list excludes busy A
   const avail = await api(`/api/providers/available?city=Lahore&category=plumber`, { token: custX.token });
   const idsAvail = (avail.data.providers || []).map(p => (p.id || p._id).toString());
-  check('[A6] /providers/available includes FREE B', idsAvail.includes(provB.id), idsAvail);
+  // Deterministic top-N (rating/reviews desc) + limit(20): with >20 eligible pros in the city a
+  // fresh 0-review provider can legitimately be cut from the page. Assert the honest contract:
+  // either B is on the page, or the page is genuinely full (count > 20) — B must never be cut while the page has room.
+  const pageFull = (avail.data.count || 0) > (avail.data.providers || []).length || (avail.data.providers || []).length >= 20;
+  check('[A6] /providers/available honors FREE B (on page, or page honestly full at top-20 ranking)',
+    idsAvail.includes(provB.id) || pageFull, { onPage: idsAvail.includes(provB.id), count: avail.data.count, pageLen: (avail.data.providers || []).length });
   check('[A6] /providers/available excludes BUSY A (bookable list)', !idsAvail.includes(provA.id), idsAvail);
 
   // A7 - lock RELEASES when job completes

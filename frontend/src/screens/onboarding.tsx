@@ -413,7 +413,9 @@ export function AuthScreen() {
           <div className="animate-slide-up space-y-5">
             <OtpBoxes value={otp} onChange={setOtp} />
             
-            {debugOtp && (
+            {/* AUDIT FIX (2026-08-24): the dev OTP helper was shown on ANY build whenever the
+                backend returned an OTP in the payload - developer-facing. DEV-gated now. */}
+            {import.meta.env.DEV && debugOtp && (
               <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm">
                 <p className="font-semibold text-amber-700">Dev Mode OTP:</p>
                 <p className="font-mono text-lg font-bold text-amber-900">{debugOtp}</p>

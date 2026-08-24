@@ -70,8 +70,9 @@ const ROOT = path.join(__dirname, '..', '..');
   const iScrollOpen = prov.indexOf('flex-1 overflow-y-auto px-4 pb-4');
   check('L1 incoming-requests block is INSIDE the primary scroll region, and "Your offers · live" moved BELOW it',
     iScrollOpen !== -1 && iReq > iScrollOpen && iOffers > iReq, { iScrollOpen, iReq, iOffers });
-  check('L2 compact fixed top (slim toggle card p-4, compact stats p-2.5) — requests own the screen',
-    prov.includes('overflow-hidden rounded-3xl p-4 text-white') && prov.includes('rounded-2xl bg-white p-2.5 shadow-card'));
+  check('L2 compact fixed top (slim gradient card, no stats triplet on Home — stats live on Profile since 2026-08-24) — requests own the screen',
+    prov.includes('overflow-hidden rounded-3xl p-4 text-white') && !prov.includes("Today's earnings") &&
+    !prov.includes('rounded-2xl bg-white p-2.5 shadow-card'));
   check('L3 ID-based no-repeat notification tracking preserved (knownRequestIdsRef still wired)',
     prov.includes('knownRequestIdsRef') && (prov.includes('notifyAlert') || prov.includes('playNewRequestTone(')));
   check('L4 busy-lock focus-mode + offline states preserved in the scroll region',

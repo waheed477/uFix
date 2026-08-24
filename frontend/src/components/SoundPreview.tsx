@@ -75,7 +75,7 @@ export function SoundPreviewScreen() {
   return (
     <div className="flex h-full flex-col bg-ink-50">
       <header className="flex items-center gap-3 bg-white px-4 py-3.5 shadow-sm">
-        <button onClick={back} className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95">
+        <button onClick={back} aria-label="Go back" className="tap-highlight-none -ml-1 rounded-xl p-1.5 text-ink-600 hover:bg-ink-100 active:scale-95">
           <ChevronLeftIcon className="h-5 w-5" />
         </button>
         <div className="flex-1">
