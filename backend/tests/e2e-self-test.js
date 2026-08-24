@@ -234,7 +234,7 @@ const SRC = (f) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
   console.log('\n=== Step 12: customer CANCEL on separate request (R2) ===');
   const custSrc = SRC(path.join('screens', 'customer.tsx'));
   check('S12a visible Cancel CTA wired to cancelRequest in offers screen',
-    /cancelRequest\(request\.id\)/.test(custSrc) && custSrc.includes('>Cancel<'));
+    /cancelRequest\(request\.id\)/.test(custSrc) && custSrc.includes('>Cancel request<'));
   const can = await api(`/api/requests/${R2}/cancel`, { method: 'PATCH', token: C2.token });
   check('S12b cancel 200', can.status === 200, can.data);
   await sleep(800);

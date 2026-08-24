@@ -53,7 +53,8 @@ const locSrcPath = path.join(__dirname, '../../frontend/src/lib/location.ts');
     /Cheapest first/.test(cust) && /b\.timestamp - a\.timestamp/.test(cust));
   check('S4 "⚡ Closest" badge: only >1 offers, unique min-distance winner, recompute-safe (derived reduce, not stored state)',
     /⚡ Closest/.test(cust) && /closestOfferId = sortedOffers\.length > 1/.test(cust) &&
-    /reduce\(\(min, o\) => \(o\.distanceKm < min\.distanceKm/.test(cust));
+    (/reduce\(\(min, o\) => \(\(o\.distanceKm \?\? 9999\) < \(min\.distanceKm \?\? 9999\)/.test(cust) // null-safe form (2026-08-23)
+      || /reduce\(\(min, o\) => \(o\.distanceKm < min\.distanceKm/.test(cust)));
   check('S5 provider incoming list: default NEAREST-FIRST ordering via shared requestCoords + live Haversine (no toggle, client-side only)',
     /sortedRequests = useMemo/.test(prov) && /requestCoords/.test(prov) && /dist\(a\) - dist\(b\)/.test(prov) &&
     /\{sortedRequests\.map/.test(prov));

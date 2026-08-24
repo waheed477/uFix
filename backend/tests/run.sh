@@ -22,6 +22,7 @@ TEST_SUITES=(
   tests/no-premature-offer.js              # BUG FIX lock: empty offers until provider POSTs; root-cause nav guard (2026-08-23)
   tests/distance-ux.js                     # Distance UX: shared pattern/ETA (18 km/h), 3-way sort, Closest badge, live snapshot proof (2026-08-23)
   tests/chat-no-duplicate.js               # Chat duplicate fix: sender self-echo reconciles optimistic temp; exactly-one live incl. rapid sends (2026-08-23)
+  tests/ui-polish-audit.js                 # UI polish pass: distance honesty cap, single-ETA, jargon-free UI, rating format, decline confirm, dead-end audit (2026-08-23)
 )
 
 total_pass=0; total_fail=0; failed_suites=()

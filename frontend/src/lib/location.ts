@@ -322,6 +322,12 @@ export function calculateDistanceKm(lat1: number, lng1: number, lat2: number, ln
  * claiming traffic awareness). minutes = km * (60/18) = km * 3.33, rounded UP so we
  * never promise faster-than likely, floor 2 min (a 300m trip is still "a couple of
  * minutes"), display cap 999. Shared by ALL distance displays - one assumption, one place. */
+/** 2026-08-23 (BUG 1): beyond this, a distance number is meaningless for a hyperlocal
+ * service match (providers have ~10-20 km radii) - it is almost certainly a stray/fallback
+ * coordinate artifact (e.g. one party's real GPS was never available). UI shows
+ * "Distance unavailable" instead of presenting it as accurate. */
+export const MAX_PLAUSIBLE_DISTANCE_KM = 50;
+
 export function estimateTravelMinutes(km: number): number {
   if (!isFinite(km) || km < 0) return 0;
   if (km === 0) return 1;

@@ -161,7 +161,9 @@ const getAvailableProviders = async (req, res) => {
     const busyProviderIds = await Job.distinct('provider', { status: { $ne: 'completed' } });
     if (busyProviderIds.length > 0) filter._id = { $nin: busyProviderIds };
     const count = await User.countDocuments(filter);
-    const providers = await User.find(filter).select('name category city rating reviews profilePicture isOnline defaultVisitingCharge yearsExperience').limit(20).lean();
+    // Deterministic top-N: sort before limiting so a busy DB with 20+ online pros in a city never
+    // arbitrarily hides the SAME free provider relative to insertion order (2026-08-24 polish audit).
+    const providers = await User.find(filter).select('name category city rating reviews profilePicture isOnline defaultVisitingCharge yearsExperience').sort({ rating: -1, reviews: -1, _id: 1 }).limit(20).lean();
     return res.status(200).json({
       status: 'success',
       city: city || 'all',

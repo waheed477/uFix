@@ -623,6 +623,70 @@ before production as already documented).
 **Verification:** sound-system.js 21/21 updated (exact freq/sweep/shape locks on all six candidates
 + live feed-through); NEW chat-no-duplicate.js 12/12; full battery **362/362 green**; build 512.09 kB.
 
+## Screenshot polish pass: distance honesty, jargon removal, rating format, decline/cancel affordances, dead-end audit — 2026-08-24
+
+### BUG 1 (CRITICAL) — Distance honesty: never present fallback/fake values as real data
+Trace result: TWO sources of nonsense in one card area: (a) fake DEFAULT_COORDS-base or stale
+coords surviving through fallbacks (adapter `?? 1.5` for offers, `?? 1.2` for requests; card-level
+`req.distanceKm` fallback), (b) the SAME card showing "0.0 km · ~1 min" AND a separate "ETA 15 min"
+chip (provider-declared/default) — two contradictory numbers for one fact.
+Fixes:
+- `DistanceDisplay` (ui.tsx): km null/undefined/non-finite OR `km > MAX_PLAUSIBLE_DISTANCE_KM` (=50,
+  exported from lib/location.ts — beyond this, a hyperlocal match's distance is meaningless → it was
+  a stray fallback artifact like "934.5 km · ~999 min") → renders a muted **"Distance unavailable"**
+  state, NEVER the garbage number.
+- adapters `?? null` (no fake 1.5/1.2); types made nullable (`Offer.distanceKm`, `IncomingRequest.
+  distanceKm`, `listReconcile` field); sort/closest-offer reducer null-safe (`?? 9999`).
+- Provider request card: `liveDistance` = real BOTH-sides coords or **null** (no `req.distanceKm`
+  fallback anywhere on the card). Offer card: ETA chip removed + duplicate km chip removed —
+  **the single DistanceDisplay is the only distance+time source on the card** (snapshot documented
+  earlier; jobs-screen offer summary now uses the SAME distance-derived estimate).
+- Live-proven (ui-polish-audit L1/L2): two same-city users (Faisalabad, ~2.1km apart) → card
+  distance 2.0-2.4km matching Haversine, offer snapshot matches card (one truth, no contradiction).
+
+### BUG 2 — Developer jargon removed from user-facing copy
+Removed/replaced: "Live via Socket.io offer:new..." (offers header → amber line removed, the
+existing emerald "Live" reuses the established pattern on the title), "real-time via Socket.io"
+(chat date divider → "Today"), "Status updates live via Socket.io job:statusUpdate" (Live status
+card → pulse dot + "Live updates"), "offers via old flow" (available-providers empty state → human
+copy). Audit S6: zero "Socket.io"/event-name/"old flow" in USER-VISIBLE text (code-level usages +
+comments excluded deliberately).
+
+### BUG 3 — Raw GPS coordinates
+Provider Home "📡 Live GPS: 31.3709, 73.0336" → **📍 {user.city || location.city || '—'}** (human
+label). Raw lat/lng preserved as a small "dev coords" line **behind `import.meta.env.DEV` only**
+(capability kept for debugging as suggested).
+
+### BUG 4 — One clean rating format everywhere
+New shared `RatingSummary` (ui.tsx): stars reflecting the value + `X.X` + `(N review(s))` —
+"★★☆☆☆ 2.0 (1 review)"; zero reviews → "(No reviews yet)". Applied at: OfferCard, availableProviders
+list (removed fake `|| 4.8` + number), profile self-rating, provider stats pill. All `|| 4.8` fakes
+across screens eliminated (audit S8/S9).
+
+### BUG 5 — Decline affordance
+Bare ✕ icon next to Accept → labeled rose **"Decline"** secondary button + inline two-step confirm
+arm ("Decline this offer? The pro is notified and it can't be undone. — Yes, decline / No, keep").
+
+### BUG 6 — Cancel visibility + "Providers in city" + FULL dead-end audit
+- Cancel link on offers screen → clearly-tappable rose chip button **"Cancel request"**; live-proven
+  (200 + provider gets `request:cancelled`).
+- "Providers in {city}" → navigates to AvailableProviders screen backed by GET /api/providers/
+  available — live-proven 200 + array (kept polling refresh). Screen copy also de-jargoned.
+- FULL DEAD-END AUDIT (`ui-polish-audit.js` S12-S14): all 9 navigate()/tab targets exist in Screen
+  union + render in App.tsx; zero noop onClick / href="#". **Findings (real dead ends, fixed):**
+  profile "Earnings & payouts" (noop, no screen) — REMOVED; profile "Settings" (noop, no screen) —
+  REMOVED. Also discovered latently: `/providers/available` truncated to an unsorted `limit(20)`
+  (a city with 20+ online pros could arbitrarily hide the same free provider) — now deterministic
+  sort `{rating desc, reviews desc, _id}` before limit.
+- All other primary actions were already exercised live by suites: call/chat buttons, accept (job
+  flow), status-advance timeline, withdraw, post request, mark-complete, rate, notifications.
+
+**Verification:** new suite `ui-polish-audit.js` **18/18** (S1-S5 distance honesty/single-ETA static,
+S6-S11 jargon/coords/rating/decline/cancel static, S12-S14 dead-end audit, L1-L4 live); stale locks
+updated in distance-ux S4 / provider-home-and-price S6 / offers-visibility S3 / e2e-self-test S12a /
+offer-withdraw S4 (all assert the NEW clean forms); full battery **380/380 green** on fresh server;
+build 512.24 kB; tsc errors 24 (< pre-existing 26 baseline - no new ones).
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -642,6 +706,7 @@ before production as already documented).
 - [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
 - [x] Distance UX: one shared DistanceDisplay (pin + X.X km + ~N min, 18 km/h ETA assumption), live on provider cards/ActiveJob, accurate backend-computed SNAPSHOT on offer cards (privacy-safe), offers sort Newest/Nearest/Cheapest + provider nearest-first default + ⚡ Closest badge - 351/351 green (2026-08-23)
 - [x] Chat duplicate fix (optimistic temp + self-echo reconciliation via chatMerge helper, exactly-one both sides live incl. rapid sends) + CUSTOMER-ONLY ratings (403 CUSTOMER_ONLY_RATING, provider clean completion confirmation, new_rating provider-only) + new-request/booking tones replaced (knock + cha-ching defaults; notification tone untouched) - 362/362 green (2026-08-23)
+- [x] Screenshot polish pass: distance honesty (unavailable state + 50km plausibility cap, zero fake fallbacks, single ETA source per card), Socket.io jargon removed, raw GPS -> city label (coords DEV-gated), one rating format (RatingSummary, fake 4.8s gone), labeled Decline + inline confirm, Cancel chip button, full dead-end audit (dead Earnings/Settings menu items removed; providers/available deterministic sort) - 380/380 green (2026-08-24)
 - [ ] Phase 11: Deployment (Render backend + Vercel frontend + UptimeRobot ping + production env vars) - optional; P5 fail-fast makes misconfiguration loud instead of silent
 - [ ] Future: Google Places Autocomplete, Directions, Distance Matrix
 

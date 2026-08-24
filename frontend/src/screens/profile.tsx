@@ -9,12 +9,10 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   EditIcon,
-  GearIcon,
   HistoryIcon,
   LogoutIcon,
+  RatingSummary,
   ShieldIcon,
-  Stars,
-  WalletIcon,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { getCityByName, getAllCities } from "@/lib/location";
@@ -197,14 +195,7 @@ export function ProfileTab() {
           <MenuItem icon={<EditIcon className="h-5 w-5" />} label="Edit profile" onClick={() => navigate("editProfile")} />
           <div className="h-px bg-ink-100" />
           <MenuItem icon={<HistoryIcon className="h-5 w-5" />} label="Order history" value={`${jobs.length} jobs`} onClick={() => navigate("history")} />
-          {isProvider && (
-            <>
-              <div className="h-px bg-ink-100" />
-              <MenuItem icon={<WalletIcon className="h-5 w-5" />} label="Earnings & payouts" value="Cash" onClick={() => {}} />
-            </>
-          )}
-          <div className="h-px bg-ink-100" />
-          <MenuItem icon={<GearIcon className="h-5 w-5" />} label="Settings" onClick={() => {}} />
+
         </div>
 
         {import.meta.env.DEV && (
@@ -247,7 +238,7 @@ export function EditProfileScreen() {
         <div className="flex flex-col items-center py-4">
           <Avatar initials={user?.avatar ?? "?"} color={user?.color ?? "#167a6c"} size={80} online={isProvider ? user?.isOnline : undefined} src={user?.profilePicture} />
           <p className="mt-3 flex items-center gap-1 text-xs font-medium text-ink-400">
-            <Stars value={user?.rating ?? 4.8} size={13} /> {user?.rating} · {user?.reviews} reviews
+            <span className="text-xs">{user?.reviews ? <RatingSummary value={user?.rating} count={user?.reviews} size={13} /> : "No reviews yet"}</span>
           </p>
         </div>
 

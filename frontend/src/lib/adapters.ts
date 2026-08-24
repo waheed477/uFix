@@ -178,8 +178,9 @@ export const adaptBackendOfferToFrontendOffer = (backendOffer: any, options: { c
   const providerName = provider ? provider.name : (options as any).providerName || 'Provider';
   const category = (backendOffer.request && typeof backendOffer.request === 'object' ? backendOffer.request.category : null) || options.category || (provider?.category as Category) || 'plumber';
 
-  // DistanceKm: if provided via options, use it, else if offer has distanceKm, use it, else fallback 1.5
-  const distanceKm = options.distanceKm !== undefined ? options.distanceKm : (backendOffer.distanceKm ?? 1.5);
+  // distanceKm: real snapshot computed backend-side at offer creation (2026-08-23). NEVER fake
+  // one (the old 1.5 default was nonsense presented as data) - null renders "Distance unavailable".
+  const distanceKm = options.distanceKm !== undefined ? options.distanceKm : (backendOffer.distanceKm ?? null);
 
   const adapted: any = {
     id: (backendOffer.id || backendOffer._id?.toString() || backendOffer._id).toString(),
@@ -353,7 +354,7 @@ export const adaptBackendRequestToIncomingRequest = (backendRequest: any, option
       label: backendRequest.address || 'Customer location',
     },
     address: backendRequest.address || '',
-    distanceKm: backendRequest.distanceKm ?? 1.2, // from geo query
+    distanceKm: backendRequest.distanceKm ?? null, // real from geo query; no fake 1.2 fallback (2026-08-23)
     createdAt: toTimestamp(backendRequest.createdAt),
     fee: undefined, // not in backend Request, but frontend IncomingRequest has fee range
     _backend: backendRequest,

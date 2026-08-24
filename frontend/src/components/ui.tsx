@@ -3,7 +3,7 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 import { cn } from "@/utils/cn";
 import type { Category, JobStatus } from "@/lib/types";
 import { categoryById, STATUS } from "@/lib/types";
-import { estimateTravelMinutes } from "@/lib/location";
+import { estimateTravelMinutes, MAX_PLAUSIBLE_DISTANCE_KM } from "@/lib/location";
 
 /* ============================================================
    SVG ICONS  (custom, consistent stroke style)
@@ -438,16 +438,44 @@ export function DistanceDisplay({
   size?: number;
   className?: string;
 }) {
-  if (km === null || km === undefined || !isFinite(km)) return null;
+  const iconCls = size <= 11 ? "h-3 w-3" : size <= 13 ? "h-3.5 w-3.5" : "h-4 w-4"; // icons take className only
+  // BUG 1 (2026-08-23): NEVER present a fallback/fake/unplausible value as real data. If real
+  // coordinates are not (yet) available, or the value is implausibly large for a hyperlocal
+  // service match (stray fallback coords artifact), show an honest unavailable state instead.
+  const implausible = km === null || km === undefined || !isFinite(km) || km > MAX_PLAUSIBLE_DISTANCE_KM;
+  if (implausible) {
+    return (
+      <span className={cn("inline-flex min-w-0 items-center gap-1", className)}>
+        <MapPinIcon className={cn("shrink-0 text-ink-300", iconCls)} />
+        <span className="shrink-0 font-medium text-ink-300">Distance unavailable</span>
+      </span>
+    );
+  }
   const rounded = Math.round(km * 10) / 10;
   const mins = estimateTravelMinutes(rounded);
-  const iconCls = size <= 11 ? "h-3 w-3" : size <= 13 ? "h-3.5 w-3.5" : "h-4 w-4"; // icons take className only
   return (
     <span className={cn("inline-flex min-w-0 items-center gap-1", className)}>
       {live && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" />}
       <MapPinIcon className={cn("shrink-0 text-brand-600", iconCls)} />
       <span className="shrink-0 font-bold text-ink-800">{rounded.toFixed(1)} km</span>
       <span className="shrink-0 font-medium text-ink-400">· ~{mins} min away{live ? " · live" : ""}</span>
+    </span>
+  );
+}
+
+/** BUG 4 (2026-08-23): ONE clean rating format everywhere - star icons reflecting the value +
+ *  numeric rating (1 decimal) + review count in explicit words: "★★☆☆☆ 2.0 (1 review)".
+ *  count 0/undefined
+ull → "(No reviews yet)". Never a bare "2 (1)" or a faked 4.8. */
+export function RatingSummary({ value, count, size = 13, className }: { value: number | null | undefined; count?: number | null; size?: number; className?: string }) {
+  const rating = typeof value === "number" && isFinite(value) ? value : null;
+  return (
+    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap", className)}>
+      <Stars value={rating ?? 0} size={size} />
+      {rating !== null && <span className="font-semibold text-ink-700">{rating.toFixed(1)}</span>}
+      {count !== undefined ? (
+        <span className="text-ink-400">({count && count > 0 ? `${count} review${count === 1 ? "" : "s"}` : "No reviews yet"})</span>
+      ) : null}
     </span>
   );
 }

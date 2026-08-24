@@ -37,7 +37,8 @@ const api = (p, { method = 'GET', body, token } = {}) =>
     !/customer\.tsx/.test('') && !/(DEMO|MOCK|PLACEHOLDER|dummy).{0,40}offer/i.test(cust));
   check('S3 OfferCard zones: price column shrink-0 + max-w-[44%]; stars nowrap shrink-0; reviews truncate (no overlap possible)',
     /shrink-0 max-w-\[44%\] pl-2 text-right[\s\S]{0,200}offer\.visitingCharge/.test(cust) &&
-    /overflow-hidden whitespace-nowrap[\s\S]{0,260}min-w-0 truncate text-xs text-ink-400/.test(cust));
+    /overflow-hidden whitespace-nowrap text-xs"><RatingSummary value=\{offer\.providerRating\} count=\{offer\.providerReviews\}/.test(cust) &&
+    !/>\(\{offer\.providerReviews\}\)</.test(cust)); // clean one-format RatingSummary row, now-wrapped (2026-08-23)
   check('S4 AvailableProviders card: same discipline (shrink-0 capped price column + min-w-0 truncate city + nowrap stars) applied consistently',
     (cust.match(/max-w-\[44%\]/g) || []).length === 2 && /min-w-0 truncate">\{p\.city\}/.test(cust));
   check('S5 MyOfferCard (provider side reuse) keeps its own shrink-0 price + line-clamp-1 description (already safe, keeps locked)',

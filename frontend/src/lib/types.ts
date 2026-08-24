@@ -52,7 +52,7 @@ export interface Offer {
   category: Category;
   visitingCharge: number;
   etaMin: number;
-  distanceKm: number;
+  distanceKm: number | null;
   timestamp: number;
   /** Backend offer status (pending/accepted/rejected) - set by adapter, used to filter declined offers */
   status?: string;
@@ -196,7 +196,7 @@ export interface IncomingRequest {
   description: string;
   location: GeoPoint;
   address: string;
-  distanceKm: number;
+  distanceKm: number | null;
   createdAt: number;
   fee?: string;
 }

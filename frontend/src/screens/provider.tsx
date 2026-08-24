@@ -87,15 +87,22 @@ function RequestCard({
   const [charge, setCharge] = useState(basePrice);
 
   // Live distance calculation reading both live locations
+  // Live distance from BOTH live locations (2026-08-23, BUG 1): if either side's real
+  // coordinates are not available at render time, return null (UI shows "Distance
+  // unavailable") - NEVER fall back to a stale snapshot or a default-coords artifact
+  // (the old req.distanceKm fallback could be a bogus DEFAULT_COORDS-based value like
+  // 934.5 km for two users in the SAME city, shown as if real). Data layer still keeps
+  // r.distanceKm = null (adapter no longer fakes it) so the sorter below just orders
+  // unknowns last.
   const liveDistance = useMemo(() => {
-    if (!providerCoords) return req.distanceKm;
+    if (!providerCoords) return null;
     const rc = requestCoords(req);
-    if (!rc) return req.distanceKm;
+    if (!rc) return null;
     try {
       const dist = calculateDistanceKm(providerCoords.lat, providerCoords.lng, rc.lat, rc.lng);
       return Math.round(dist * 10) / 10; // 1 decimal for precision
     } catch {
-      return req.distanceKm;
+      return null;
     }
   }, [providerCoords, req]);
 
@@ -360,7 +367,14 @@ export function ProviderHome() {
             <div className="leading-tight">
               <p className="text-xs font-medium text-ink-500">Welcome back 👋 {location.city ? `· ${location.city}` : ''}</p>
               <p className="font-display text-base font-bold text-ink-900">{firstName}</p>
-              {effectiveCoords && <p className="text-[10px] text-emerald-600">📡 Live GPS: {effectiveCoords.lat.toFixed(4)}, {effectiveCoords.lng.toFixed(4)}</p>}
+              {/* BUG 3 (2026-08-23): human-readable area/city label, never raw coordinates.
+                  Raw lat/lng kept ONLY in dev builds for debugging. */}
+              {effectiveCoords && (
+                <p className="text-[10px] text-emerald-600">📍 {(user?.city || location.city || "—")}</p>
+              )}
+              {import.meta.env.DEV && effectiveCoords && (
+                <p className="text-[9px] text-ink-300">dev coords: {effectiveCoords.lat.toFixed(4)}, {effectiveCoords.lng.toFixed(4)}</p>
+              )}
             </div>
           </div>
           <NotificationBell />
@@ -399,7 +413,7 @@ export function ProviderHome() {
           {[
             { label: "Today's earnings", value: `PKR ${earnings}`, icon: <BanknoteIcon className="h-4 w-4" /> },
             { label: "Jobs done", value: `${user?.jobsCompleted ?? 0}`, icon: <BriefcaseIcon className="h-4 w-4" /> },
-            { label: "Rating", value: `${user?.rating ?? 4.8}★`, icon: <Stars value={user?.rating ?? 4.8} size={12} /> },
+            { label: "Rating", value: user?.reviews ? `${(user?.rating ?? 0).toFixed(1)}★ · ${user.reviews}` : "No ratings", icon: <Stars value={user?.rating ?? 0} size={12} /> },
           ].map((s, i) => (
             <div key={i} className="rounded-2xl bg-white p-2.5 shadow-card">
               <div className="mb-1 flex items-center gap-1.5 text-ink-400">{s.icon}</div>

@@ -36,7 +36,7 @@ import {
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { adaptBackendJobToFrontendJob } from "@/lib/adapters";
-import { DEFAULT_COORDS, calculateDistanceKm, watchPosition, clearWatch, isGoogleMapsAvailable, type Coords } from "@/lib/location";
+import { DEFAULT_COORDS, calculateDistanceKm, estimateTravelMinutes, watchPosition, clearWatch, isGoogleMapsAvailable, type Coords } from "@/lib/location";
 import { socketClient } from "@/lib/socket";
 
 function statusIndex(s: JobStatus) {
@@ -230,7 +230,7 @@ export function ActiveJobScreen() {
           <div className="animate-slide-up rounded-3xl bg-white p-5 shadow-card" style={{ animationDelay: "80ms" }}>
             <h3 className="mb-4 font-display text-sm font-bold text-ink-900">Live status</h3>
             <Timeline status={activeJob.status} />
-            <p className="mt-3 text-center text-[11px] text-ink-400">Status updates live via Socket.io job:statusUpdate</p>
+            <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] text-ink-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> Live updates</p>
           </div>
 
           <div className="pb-2">
@@ -327,7 +327,7 @@ export function ChatScreen() {
           </div>
         ) : (
           <div className="space-y-2.5">
-            <p className="pb-1 text-center text-[11px] font-medium text-ink-400">Today - real-time via Socket.io</p>
+            <p className="pb-1 text-center text-[11px] font-medium text-ink-400">Today</p>
             {msgs.map((m) => {
               const mine = m.senderId === "me";
               return (
@@ -489,7 +489,7 @@ export function JobsTab() {
           {isCustomer && openRequestWithOffers && (
             <div className="mb-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 p-4 shadow-card">
               <div className="flex items-center justify-between">
-                <div><p className="font-display text-sm font-bold text-ink-900">🔔 {openRequestWithOffers.offers?.length || 0} offers received - Live</p><p className="mt-1 text-xs text-ink-600 line-clamp-1">“{openRequestWithOffers.description}” • {openRequestWithOffers.address}</p><p className="mt-1 text-[11px] text-amber-700">Live via Socket.io offer:new - offers appear here without refresh</p></div>
+                <div><p className="font-display text-sm font-bold text-ink-900">🔔 {openRequestWithOffers.offers?.length || 0} offers received <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 align-middle text-[10px] font-bold text-emerald-700"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> Live</span></p><p className="mt-1 text-xs text-ink-600 line-clamp-1">“{openRequestWithOffers.description}” • {openRequestWithOffers.address}</p></div>
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500 text-white font-bold text-sm">{openRequestWithOffers.offers?.length || 0}</span>
               </div>
               <div className="mt-3 flex gap-2"><Button size="sm" className="flex-1" onClick={() => navigate('offers')}>View Offers ({openRequestWithOffers.offers?.length || 0}) - Live</Button><Button size="sm" variant="outline" onClick={() => navigate('availableProviders')}>Providers in {(openRequestWithOffers as any).city || 'city'}</Button></div>
@@ -497,7 +497,7 @@ export function JobsTab() {
                 <div className="mt-3 space-y-2">
                   {openRequestWithOffers.offers.slice(0,2).map((offer: any) => (
                     <div key={offer.id} className="flex items-center justify-between rounded-xl bg-white p-3 shadow-sm">
-                      <div className="flex items-center gap-2"><Avatar initials={offer.avatarInitials || 'P'} color={offer.avatarColor || '#167a6c'} size={32} /><div><p className="text-xs font-bold text-ink-900">{offer.providerName}</p><p className="text-[11px] text-ink-500">PKR {offer.visitingCharge} • ETA {offer.etaMin} min</p></div></div>
+                      <div className="flex items-center gap-2"><Avatar initials={offer.avatarInitials || 'P'} color={offer.avatarColor || '#167a6c'} size={32} /><div><p className="text-xs font-bold text-ink-900">{offer.providerName}</p><p className="text-[11px] text-ink-500">PKR {offer.visitingCharge}{offer.distanceKm != null ? ` • ${offer.distanceKm.toFixed(1)} km · ~${estimateTravelMinutes(offer.distanceKm)} min` : ""}</p></div></div>
                       {/* Real inline accept (same PATCH /api/offers/:id/accept path as the Offers screen) -
                           previously this button only navigated, a duplicate/fake entry point (Part E) */}
                       <Button size="sm" disabled={isLoading['acceptOffer']} onClick={() => acceptOffer(openRequestWithOffers.id, offer)}>Accept</Button>

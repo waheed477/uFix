@@ -75,7 +75,7 @@ const FSD = { lng: 73.0776, lat: 31.4181, city: 'Faisalabad' };
   console.log('\n=== Issue 3 static: customer cancel reachable in UI ===');
   const custSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'screens', 'customer.tsx'), 'utf8');
   check('S4 Offers screen has visible Cancel action wired to cancelRequest',
-    /cancelRequest\(request\.id\)/.test(custSrc) && custSrc.includes('>Cancel<'));
+    /cancelRequest\(request\.id\)/.test(custSrc) && custSrc.includes('>Cancel request<'));
 
   console.log('\n=== LIVE: customer + 3 providers (A withdraws, B accepted, C not-selected) ===');
   const cust = await register(`+92330${uniq}`, 'W Test Customer', 'customer', 'Faisalabad');

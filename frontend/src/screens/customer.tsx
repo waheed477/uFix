@@ -10,7 +10,7 @@ import { MapView, type MapMarker } from "@/components/MapView";
 import { GoogleMapView } from "@/components/GoogleMap";
 import { NotificationBell } from "@/components/notifications";
 import { PlaceSearch } from "@/components/PlaceSearch";
-import { DEFAULT_COORDS, offsetToCoords, reverseGeocode, isGoogleMapsAvailable, estimateTravelMinutes } from "@/lib/location";
+import { DEFAULT_COORDS, offsetToCoords, reverseGeocode, isGoogleMapsAvailable } from "@/lib/location";
 import {
   Avatar,
   BanknoteIcon,
@@ -26,8 +26,8 @@ import {
   PlusIcon,
   ShieldIcon,
   Skeleton,
-  Stars,
   DistanceDisplay,
+  RatingSummary,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { adaptBackendOfferToFrontendOffer } from "@/lib/adapters";
@@ -242,27 +242,41 @@ export function NewRequest() {
 }
 
 function OfferCard({ offer, onAccept, onDecline, index, isAccepting, isClosest }: { offer: Offer; onAccept: () => void; onDecline: () => void; index: number; isAccepting?: boolean; isClosest?: boolean; }) {
+  // BUG 5: two-tap inline confirm for the destructive decline action
+  const [confirmingDecline, setConfirmingDecline] = useState(false);
   return (
     <div className="animate-slide-in-right rounded-2xl bg-white p-4 shadow-card" style={{ animationDelay: `${index * 60}ms` }}>
       <div className="flex items-center gap-3">
         <Avatar initials={offer.avatarInitials} color={offer.avatarColor} size={46} online />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5"><span className="truncate font-display text-[15px] font-bold text-ink-900">{offer.providerName}</span><ShieldIcon className="h-4 w-4 shrink-0 text-brand-600" />{isClosest && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">⚡ Closest</span>}</div>
-          <div className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap"><span className="shrink-0"><Stars value={offer.providerRating} size={14} /></span><span className="shrink-0 text-xs font-semibold text-ink-700">{offer.providerRating}</span><span className="min-w-0 truncate text-xs text-ink-400">({offer.providerReviews})</span></div>
+          {/* BUG 4 (2026-08-23): one clean rating format everywhere (stars + "2.0 (1 review)") */}
+          <div className="mt-0.5 overflow-hidden whitespace-nowrap text-xs"><RatingSummary value={offer.providerRating} count={offer.providerReviews} size={14} /></div>
           {/* SNAPSHOT distance captured at offer-creation (backend Haversine; provider's precise
               coords never reach the customer pre-acceptance). ~time = 18 km/h urban assumption. */}
           <div className="mt-0.5 overflow-hidden whitespace-nowrap text-xs"><DistanceDisplay km={offer.distanceKm} size={12} /></div>
         </div>
         <div className="shrink-0 max-w-[44%] pl-2 text-right"><p className="text-[11px] font-medium text-ink-400">Visiting charge</p><p className="font-display text-2xl font-extrabold leading-tight text-accent-600">PKR {offer.visitingCharge}</p></div>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><ClockIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">ETA {offer.etaMin} min</span></div>
-        <div className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2"><NavigateIcon className="h-4 w-4 text-brand-600" /><span className="text-xs font-semibold text-ink-700">{offer.distanceKm.toFixed(1)} km · ~{estimateTravelMinutes(offer.distanceKm)} min</span></div>
-      </div>
+      {/* BUG 1.3 (2026-08-23): the old "ETA {etaMin} min" chip (declared/default) could say
+          15 min while the distance-based chip said "~1 min" on the SAME card - two numbers for
+          one fact. REMOVED: the single DistanceDisplay above is the only distance+time source.
+          (Provider-declared etaMinutes still available on offer._backend if ever needed.) */}
+      {/* BUG 5 (2026-08-23): labeled Decline + inline confirm arm. A bare ✕ icon next to the
+          primary Accept button was one accidental tap away from an irreversible decline. */}
       <div className="mt-3 flex gap-2">
-        <Button size="sm" className="flex-1" onClick={onAccept} disabled={isAccepting}>{isAccepting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : "Accept & unlock contact"}</Button>
-        <button onClick={onDecline} disabled={isAccepting} className="tap-highlight-none flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-500"><CloseIcon className="h-4 w-4" /></button>
+        <Button size="sm" className="flex-1" onClick={onAccept} disabled={isAccepting || confirmingDecline}>{isAccepting ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : "Accept & unlock contact"}</Button>
+        <button onClick={() => setConfirmingDecline(true)} disabled={isAccepting || confirmingDecline} className="tap-highlight-none flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-rose-50 px-3 text-xs font-semibold text-rose-600"><CloseIcon className="h-3.5 w-3.5" />Decline</button>
       </div>
+      {confirmingDecline && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-rose-50/70 px-3 py-2 text-xs animate-fade-in">
+          <span className="font-medium text-rose-700">Decline this offer? The pro is notified and it can't be undone.</span>
+          <span className="flex shrink-0 gap-2">
+            <button onClick={() => { setConfirmingDecline(false); onDecline(); }} disabled={isAccepting} className="rounded-lg bg-rose-500 px-3 py-1.5 font-bold text-white">Yes, decline</button>
+            <button onClick={() => setConfirmingDecline(false)} className="rounded-lg bg-white px-3 py-1.5 font-semibold text-ink-600">No, keep</button>
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -384,13 +398,13 @@ export function OffersScreen() {
 
   const sortedOffers = [...offers].sort((a, b) =>
     sort === "price" ? a.visitingCharge - b.visitingCharge
-    : sort === "distance" ? a.distanceKm - b.distanceKm
+    : sort === "distance" ? (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999)
     : b.timestamp - a.timestamp // newest first
   );
   // "Closest" badge (Distance UX Task 3): only when >1 offer; single lowest snapshot distance;
   // recomputes automatically with any offers/sort change (derived from current offer list).
   const closestOfferId = sortedOffers.length > 1
-    ? sortedOffers.reduce((min, o) => (o.distanceKm < min.distanceKm ? o : min), sortedOffers[0]).id
+    ? sortedOffers.reduce((min, o) => ((o.distanceKm ?? 9999) < (min.distanceKm ?? 9999) ? o : min), sortedOffers[0]).id
     : null;
   const meta = categoryById(request.category);
   const isAccepting = isLoading['acceptOffer'];
@@ -437,7 +451,8 @@ export function OffersScreen() {
       <div className="border-t border-ink-100 bg-white px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 text-xs text-ink-500"><BanknoteIcon className="h-4 w-4 shrink-0 text-emerald-600" /><span>Fee for {location.city} · pay on site</span></div>
-          <button onClick={()=>cancelRequest(request.id)} className="shrink-0 text-xs font-semibold text-rose-500">Cancel</button>
+          {/* BUG 6.1 (2026-08-23): was a barely-readable text link - now a real small button */}
+          <button onClick={()=>cancelRequest(request.id)} className="tap-highlight-none shrink-0 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 active:scale-[0.98]">Cancel request</button>
         </div>
       </div>
     </div>
@@ -531,7 +546,7 @@ export function AvailableProvidersScreen() {
             {[0,1,2].map(i=><div key={i} className="rounded-2xl bg-white p-4 shadow-card animate-pulse"><Skeleton className="h-12 w-full" /></div>)}
           </div>
         ) : providers.length === 0 ? (
-          <EmptyState icon={<ClockIcon className="h-9 w-9" />} title={`No ${request.category} online in ${location.city}`} subtitle={`No ${request.category} providers online in ${location.city} right now. Try refreshing or wait for offers via old flow.`} />
+          <EmptyState icon={<ClockIcon className="h-9 w-9" />} title={`No ${request.category} online in ${location.city}`} subtitle={`No ${request.category} providers online in ${location.city} right now. Check back soon — as soon as one comes online, your request reaches them automatically.`} />
         ) : (
           <div className="space-y-3">
             {providers.map((p: any, idx: number) => (
@@ -543,7 +558,7 @@ export function AvailableProvidersScreen() {
                     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-ink-500">
                       <span className="shrink-0 font-semibold" style={{ color: meta.color }}>{p.category}</span>
                       <span className="shrink-0 text-ink-300">·</span><span className="min-w-0 truncate">{p.city}</span>
-                      <span className="shrink-0 text-ink-300">·</span><span className="shrink-0 whitespace-nowrap"><Stars value={p.rating || 4.8} size={12} /> <span className="font-semibold">{p.rating || 4.8}</span></span>
+                      <span className="shrink-0 text-ink-300">·</span><span className="shrink-0 whitespace-nowrap text-xs">{p.reviews > 0 ? <RatingSummary value={p.rating} count={p.reviews} size={12} /> : <span className="font-medium text-ink-400">New — no reviews yet</span>}</span>
                     </div>
                   </div>
                   <div className="shrink-0 max-w-[44%] pl-2 text-right"><p className="text-[11px] font-medium text-ink-400">Price</p><p className="font-display text-2xl font-extrabold leading-tight text-accent-600">PKR {p.defaultVisitingCharge || 500}</p></div>

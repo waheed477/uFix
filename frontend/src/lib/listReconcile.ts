@@ -24,7 +24,7 @@ export interface ReconcilableRequest {
   address?: string;
   category?: string;
   customerName?: string;
-  distanceKm?: number;
+  distanceKm?: number | null;
   createdAt?: number;
   status?: string;
   [key: string]: any;
