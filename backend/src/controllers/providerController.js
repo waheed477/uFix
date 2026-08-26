@@ -119,12 +119,23 @@ const verifyProvider = async (req, res) => {
     }
     const adminSecret = process.env.ADMIN_SECRET;
     const providedSecret = req.headers['x-admin-secret'] || req.body.adminSecret;
-    if (adminSecret) {
+    if (process.env.NODE_ENV === 'production') {
+      // 2026-08-26 hardening Task 2: in production this route REQUIRES a strong ADMIN_SECRET.
+      // If it isn't configured, the route is INVISIBLE (404) rather than left open - and the
+      // misconfiguration is logged loudly on every hit so ops notices immediately.
+      if (!adminSecret) {
+        console.error('⛔ SECURITY: PATCH /api/providers/:id/verify hit in production but ADMIN_SECRET is not set - refusing (404). Set a strong random ADMIN_SECRET to enable.');
+        return res.status(404).json({ status: 'error', message: 'Not found' });
+      }
+      if (!providedSecret || providedSecret !== adminSecret) {
+        return res.status(403).json({ status: 'error', message: 'Admin secret required. Provide X-Admin-Secret header.' });
+      }
+    } else if (adminSecret) {
       if (!providedSecret || providedSecret !== adminSecret) {
         return res.status(403).json({ status: 'error', message: 'Admin secret required. Provide X-Admin-Secret header or adminSecret in body.', needsAdminSecret: true });
       }
     } else {
-      console.warn('⚠️  ADMIN_SECRET not set - PATCH /api/providers/:id/verify is open without admin protection.');
+      console.warn('⚠️  ADMIN_SECRET not set - PATCH /api/providers/:id/verify is open without admin protection (dev only).');
     }
     const user = await User.findById(id);
     if (!user) return res.status(404).json({ status: 'error', message: 'Provider not found' });
@@ -191,7 +202,9 @@ const getAvailableProviders = async (req, res) => {
 
 const devAutoVerify = async (req, res) => {
   try {
-    if (process.env.NODE_ENV === 'production') return res.status(403).json({ status: 'error', message: 'Dev auto-verify not allowed in production' });
+    // 2026-08-26 hardening Task 2: dev-convenience route must be INVISIBLE in production.
+    // 404 (not 403) - don't even reveal the hidden route exists.
+    if (process.env.NODE_ENV === 'production') return res.status(404).json({ status: 'error', message: 'Not found' });
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
     if (user.role !== 'provider') return res.status(400).json({ status: 'error', message: 'Only providers can auto-verify' });

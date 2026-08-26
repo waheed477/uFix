@@ -17,23 +17,23 @@ const { setIO: setNotifyIO } = require('../utils/notify');
 let io = null;
 
 const initSocket = (httpServer) => {
+  const isProduction = process.env.NODE_ENV === 'production';
   const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-  const allowedOrigins = clientUrl.split(',').map(o => o.trim());
+  const allowedOrigins = clientUrl.split(',').map(o => o.trim())
+    .filter(o => !(isProduction && o === '*')); // production: wildcard stripped (deny-by-default)
 
   io = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
         // Allow no origin (mobile apps, curl, postman, tests)
         if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-          return callback(null, true);
-        }
-        // In dev, allow localhost
-        if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
-          return callback(null, true);
-        }
-        // For Phase 5 testing, be permissive
-        return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        // Dev conveniences only (never in production): wildcard + any localhost port
+        if (!isProduction && allowedOrigins.includes('*')) return callback(null, true);
+        if (!isProduction && origin.includes('localhost')) return callback(null, true);
+        // Production: STRICT (2026-08-26 hardening Task 3) - old "permissive for testing"
+        // catch-all removed; unknown origins are rejected with a clear reason.
+        return callback(new Error(`Not allowed by CORS: ${origin}`));
       },
       credentials: true,
       methods: ['GET', 'POST']

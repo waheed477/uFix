@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const auth = require('../middleware/auth');
+const { otpSendPhone, otpSendIp, otpVerifyPhone, googleAuth } = require('../middleware/rateLimit');
 
 /**
  * Auth Routes - Phase 1
@@ -13,13 +14,16 @@ const auth = require('../middleware/auth');
  */
 
 // Google Sign-In
-router.post('/google', authController.googleAuth);
+// Rate-limited (2026-08-26 hardening): 20/15min per IP
+router.post('/google', googleAuth, authController.googleAuth);
 
 // Phone OTP - send
-router.post('/phone/send-otp', authController.sendOtp);
+// Rate-limited: IP 10/15min AND 3/10min per phone (OTP spam/brute-force guard)
+router.post('/phone/send-otp', otpSendIp, otpSendPhone, authController.sendOtp);
 
 // Phone OTP - verify
-router.post('/phone/verify-otp', authController.verifyOtp);
+// Rate-limited: 5/10min per phone (6-digit OTP brute-force guard)
+router.post('/phone/verify-otp', otpVerifyPhone, authController.verifyOtp);
 
 // Session management (2026-08-21): refresh is PUBLIC (its own token IS the credential);
 // logout revokes the presented refresh session server-side (idempotent)

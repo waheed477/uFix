@@ -1,6 +1,8 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
+const helmet = require('helmet');
+const { apiBaseline } = require('./middleware/rateLimit');
 const http = require('http');
 const connectDB = require('./config/db');
 const healthRoute = require('./routes/health');
@@ -20,27 +22,49 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const isProduction = process.env.NODE_ENV === 'production';
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+
+// Production CORS lockdown (2026-08-26 hardening Task 3): in production the deployed
+// frontend URL MUST be set via CLIENT_URL. A forgotten value (or a wildcard) FAILS LOUD
+// and cross-origin requests are REJECTED - never an open fallback. (The old
+// "permissive for Phase 5 testing" catch-all allowed EVERY origin - removed.)
+if (isProduction && (!process.env.CLIENT_URL || process.env.CLIENT_URL.includes('*'))) {
+  console.error('⛔ SECURITY: NODE_ENV=production requires CLIENT_URL set to the real deployed frontend URL (no wildcard). Cross-origin requests will be REJECTED until fixed.');
+}
 
 // ======================
 // Middleware
 // ======================
-const allowedOrigins = CLIENT_URL.split(',').map(o => o.trim());
+const allowedOrigins = CLIENT_URL.split(',').map(o => o.trim())
+  .filter(o => !(isProduction && o === '*')); // wildcard stripped in production (deny-by-default)
+const allowNoOrigin = true; // curl/native mobile apps/same-origin send no Origin header
+const isLocalDevOrigin = (o) => {
+  try { const h = new URL(o).hostname; return ['localhost', '127.0.0.1'].includes(h); } catch { return false; }
+};
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
-      return callback(null, true);
-    }
-    if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
-      return callback(null, true);
-    }
-    return callback(null, true); // permissive for Phase 5 testing
+    if (!origin && allowNoOrigin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (!isProduction && allowedOrigins.includes('*')) return callback(null, true); // dev-inmemory convenience
+    if (!isProduction && isLocalDevOrigin(origin)) return callback(null, true); // local dev ports
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Security headers (2026-08-26 hardening Task 5): X-Content-Type-Options, X-Frame-Options,
+// Referrer-Policy etc. CSP disabled deliberately - this is a pure JSON API (no HTML served),
+// and these defaults do not interfere with CORS/Socket.io (Socket.io handles its own CORS).
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+
+// General rate-limit safety net (2026-08-26 Task 1): 100 req/min/IP across ALL /api/*;
+// auth endpoints ALSO have stricter per-phone/per-IP limiters (authRoutes.js).
+// Skipped when RATE_LIMIT_DISABLED=true or NODE_ENV=test (regression battery convenience,
+// documented in middleware/rateLimit.js) - production never sets these.
+app.use('/api', apiBaseline);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

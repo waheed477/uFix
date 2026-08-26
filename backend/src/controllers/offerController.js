@@ -35,6 +35,15 @@ const createOffer = async (req, res) => {
     const charge = Number(visitingCharge);
     const eta = Number(etaMinutes);
 
+    // 2026-08-26 hardening Task 4: BOTH bounds server-side. Client-free API callers cannot
+    // set absurd prices (e.g. PKR 999,999,999) or pay-by-price manipulation values.
+    if (!Number.isFinite(charge) || charge < 50 || charge > 50000) {
+      return res.status(400).json({ status: 'error', message: 'visitingCharge must be between 50 and 50,000 PKR', received: visitingCharge });
+    }
+    if (!Number.isFinite(eta) || eta < 5 || eta > 1440) {
+      return res.status(400).json({ status: 'error', message: 'etaMinutes must be between 5 minutes and 1440 (24 hours)', received: etaMinutes });
+    }
+
     if (isNaN(charge) || charge <= 0) {
       return res.status(400).json({
         status: 'error',

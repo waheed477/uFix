@@ -780,6 +780,82 @@ plausibility cap (prior task) then honestly hid every distance. Root cause = dis
 greeting/📍city redundancy, static chat "Online now" pill, "Order history" counts active jobs,
 SoundPreview dev panel still bundled.
 
+## 🔒 Security Hardening — Pre-Deployment (2026-08-26)
+
+Production-hardening pass over 6 areas. Verified LIVE on a spawned production-mode server
+(NODE_ENV=production, limits ON, strict CLIENT_URL) by `backend/tests/security-hardening.js`
+(25/25) + full battery **434/434 green**. The main dev-inmemory test server uses the
+test-only bypass `RATE_LIMIT_DISABLED=true` so the battery (hundreds of rapid requests) is
+unaffected — production never sets it. Real 429/404/CORS/validation behavior is proven on
+the separate production spawn.
+
+### T1 Rate limiting (NEW — was missing entirely)
+`src/middleware/rateLimit.js` (express-rate-limit@7), friendly JSON 429s
+("Too many attempts, please try again in a few minutes" + `retryAfterMinutes`, RateLimit-* headers):
+- `POST /api/auth/phone/send-otp` — **3/10min per phone** AND **10/15min per IP**
+- `POST /api/auth/phone/verify-otp` — **5/10min per phone** (OTP brute-force guard)
+- `POST /api/auth/google` — **20/15min per IP**
+- ALL `/api/*` — **100 req/min per IP** baseline safety net
+- Skip switch: `NODE_ENV=test` or `RATE_LIMIT_DISABLED=true` (dev-inmemory sets the latter;
+  documented as test-only). Live-proven: L1–L5 429s + T2b normal single signup unaffected.
+
+### T2 Dev/admin routes
+- `POST /api/providers/dev/verify-me` → **404 Not found** in production (was 403; a hidden
+  route now looks non-existent — verified live T2c).
+- `PATCH /api/providers/:id/verify` (kept for owner use): in production **requires a correct
+  `X-Admin-Secret`**; if `ADMIN_SECRET` is unset the route returns **404** and logs loudly
+  (never left open). Live-proven: 403 without/wrong secret, 200 with correct strong secret.
+- OTP echo in send-otp response stays dev-only (was already gated; live-proven T2a).
+- Auto-verify fallbacks in nearby/available requests remain dev-only (`NODE_ENV !== 'production'`).
+
+### T3 CORS lockdown (FIXED A REAL HOLE)
+Both Express CORS (`server.js`) and Socket.io CORS (`sockets/index.js`) had a
+"permissive for Phase 5 testing" catch-all that **allowed EVERY origin**. Removed:
+production now allows ONLY exact `CLIENT_URL` entries (comma-separated, multiple allowed);
+a wildcard is stripped in production; a missing/`*` CLIENT_URL in production = boot-time loud
+error + ALL cross-origin requests rejected. Unchanged conveniences (dev only): `*`,
+localhost ports, no-Origin (curl/native apps). Live-proven: unknown origin gets no
+`access-control-allow-origin`, CLIENT_URL origin matches exactly.
+**DEPLOY STEP:** set `CLIENT_URL=https://<your-vercel-domain>` AFTER the frontend deploys
+(deployment-order dependency from Phase 11 prep).
+
+### T4 Input validation audit
+- Already present (confirmed): name 2–50, description 10–1000, review comment ≤500, chat ≤2000,
+  city ≤100, rating integer 1–5, radiusKm 2–25, defaultVisitingCharge 100–5000, phone regex,
+  OTP attempts counter + expiry, page/limit clamps (≤100/≤200).
+- **Gap fixed:** offer `visitingCharge` had no max → now **50–50,000 PKR**; `etaMinutes` now
+  explicit **5–1440** server-side (live-proven: 99,999,999 PKR and 5000-char rejection).
+- Authorization identity: all protected routes use `req.user` from the verified JWT
+  (41 usages audited); NO endpoint trusts a client-supplied user/actor/role ID.
+  (`role` is only read at SIGNUP inside verify-otp — new account creation, by design.)
+
+### T5 Security headers
+`helmet@8` mounted (`contentSecurityPolicy:false`, `crossOriginEmbedderPolicy:false` — pure
+JSON API, no HTML served). Live-proven: `x-content-type-options: nosniff`,
+`x-frame-options`, `referrer-policy` present; Socket.io/CORS behavior unaffected (434/434).
+
+### T6 Production secrets checklist (CONFIRMED complete)
+| Var | Required | Notes |
+|---|---|---|
+| `MONGO_URI` | ✅ | Atlas URI; `connectDB()` fails loudly without it (P5). |
+| `JWT_SECRET` | ✅ | **FRESH 64-hex for production** — never reuse dev. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `CLIENT_URL` | ✅ prod | Real deployed frontend URL (Vercel). No wildcard in prod. Comma-separated list supported. |
+| `NODE_ENV` | ✅ prod | Set `production` — activates all hard-gates above. |
+| `GOOGLE_CLIENT_ID` | if Google sign-in | Without it `/api/auth/google` fails loudly 500 (documented). |
+| `CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET` | if real photo uploads | Mock mode (dummy URLs) when unset. |
+| `ADMIN_SECRET` | if keep admin verify | Strong unique random, separate from all other secrets; without it admin route 404s in prod. |
+| `OTP_EXPIRY_MINUTES` | optional | default 5. |
+| `PORT` | platform-provided | Render sets automatically. |
+
+`RATE_LIMIT_DISABLED` must **NEVER** be set in production (test-only battery bypass).
+**NONE of these may be committed to git** — `.gitignore` re-confirmed excluding
+`.env`, `.env.*` (keeps `!.env.example`), plus `*.zip`, `*.log`, `node_modules/`.
+
+### Verification
+`security-hardening.js` **25/25** (8 statics + L0 + T1–T5 live on prod-mode spawn);
+full battery `tests/run.sh` (21 suites incl. new) **434/434 ALL GREEN**. Frontend untouched
+(build parity unchanged). No new npm runtime deps beyond `express-rate-limit` + `helmet`.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -799,6 +875,7 @@ SoundPreview dev panel still bundled.
 - [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
 - [x] Distance UX: one shared DistanceDisplay (pin + X.X km + ~N min, 18 km/h ETA assumption), live on provider cards/ActiveJob, accurate backend-computed SNAPSHOT on offer cards (privacy-safe), offers sort Newest/Nearest/Cheapest + provider nearest-first default + ⚡ Closest badge - 351/351 green (2026-08-23)
 - [x] Chat duplicate fix (optimistic temp + self-echo reconciliation via chatMerge helper, exactly-one both sides live incl. rapid sends) + CUSTOMER-ONLY ratings (403 CUSTOMER_ONLY_RATING, provider clean completion confirmation, new_rating provider-only) + new-request/booking tones replaced (knock + cha-ching defaults; notification tone untouched) - 362/362 green (2026-08-23)
+- [x] Security hardening pre-deployment (rate limits, dev-route 404s, CORS lockdown incl. real permissive-fallback hole fix, validation bounds, helmet, secrets checklist) - 434/434 green (2026-08-26)
 - [x] Work-location pinning (manual>gps priority, explicit unpin) + Leaflet/OSM map picker + GPS-mismatch banner + pre-acceptance privacy grid / exact post-accept (work-location.js 17/17) - 409/409 green (2026-08-24)
 - [x] Provider Home stats->Profile move + unprofessional-UI audit (DEV OTP gate, aria-labels, honest copy, rating format, PLACEHOLDER guard, long-text contracts) - 392/392 green (2026-08-24)
 - [x] Screenshot polish pass: distance honesty (unavailable state + 50km plausibility cap, zero fake fallbacks, single ETA source per card), Socket.io jargon removed, raw GPS -> city label (coords DEV-gated), one rating format (RatingSummary, fake 4.8s gone), labeled Decline + inline confirm, Cancel chip button, full dead-end audit (dead Earnings/Settings menu items removed; providers/available deterministic sort) - 380/380 green (2026-08-24)
