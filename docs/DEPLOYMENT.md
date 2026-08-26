@@ -30,12 +30,20 @@ Files: `render.yaml` (backend blueprint), `frontend/vercel.json` (SPA build), `f
 | `NODE_ENV` | `production` | |
 | `PORT` | (Render auto-set) | mat do |
 | `MONGO_URI` | Atlas string (§1) | required |
-| `JWT_SECRET` | `openssl rand -base64 32` | required (access+refresh dono isi se sign) |
-| `CLIENT_URL` | `https://<vercel-domain>` | **comma-separated allowed; multiple domains same variable me** |
-| `GOOGLE_CLIENT_ID` | Google OAuth Web client ID | **nisbag required for auth.google** — bina iske Google login LOUDLY 500 `needsConfig` karta hai (designed) |
+| `JWT_SECRET` | **fresh 64-hex** (cmd neeche) | required — access+refresh dono isi se sign. **Dev wala secret kabhi production me reuse NAHI** |
+| `CLIENT_URL` | `https://<vercel-domain>` | **production me wildcard `*` HARAAM** — unknown origins ab reject hoti hain (hardening 2026-08-26). comma-separated multiple domains OK |
+| `GOOGLE_CLIENT_ID` | Google OAuth Web client ID | **required for auth.google** — bina iske Google login LOUDLY 500 `needsConfig` karta hai (designed) |
 | `OTP_EXPIRY_MINUTES` | `5` | |
 | `CLOUDINARY_*` | (optional) | unset ⇒ mock upload mode (docs) |
-| `ADMIN_SECRET` | random | provider-verify route guard |
+| `ADMIN_SECRET` | **strong unique 32-hex+** | provider-verify admin route guard. **Unset ⇒ route production me 404** (by design). JWT_SECRET se juda value |
+| ~~RATE_LIMIT_DISABLED~~ | **kabhi set mat karo** | test/battery-only bypass — production me set kiya to rate limits band (security risk) |
+
+**Secrets generate karne ka tareeqa (har value alag, fresh):**
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # JWT_SECRET ke liye
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # ADMIN_SECRET ke liye (DOBARA run karo — same NAHI)
+```
+Secrets sirf Render/Vercel dashboards me paste karo — **kabhi git me commit nahi** (`.env*` ignored hai).
 
 > Cold-start note: free Render tier sleeps after ~15 min idle — pehli request ~30-50s late ho sakti hai. §5 UptimeRobot ping se sleep practically garib hoti hai.
 
@@ -55,8 +63,11 @@ Files: `render.yaml` (backend blueprint), `frontend/vercel.json` (SPA build), `f
    - `VITE_SOCKET_URL = same`
    - (optional) `VITE_GOOGLE_MAPS_API_KEY`
 4. Deploy → domain milega → **wohi domain Render `CLIENT_URL` mein daal ke backend REDEPLOY karo** (CORS)
+   > Security note (2026-08-26 hardening): production CORS ab **strict** hai — `CLIENT_URL` me type ho ya mismatch ho to frontend se API calls block ho jayengi; domain EXACT match karna (https:// prefix ke saath, trailing slash nahi).
 
 ## 5 · UptimeRobot (sleep-proofing)
+
+> Rate-limit note (2026-08-26): monitor ping `/api/health` ko hit karta hai — 1 ping / 5 min `100 req/min per IP` baseline se KAYI gunah kam hai; monitor kabhi 429 nahi khaayega.
 
 1. uptimerobot.com → Add Monitor → **HTTP(s)**, URL: `https://ufix-backend.onrender.com/api/health`, interval **5 min**
 2. (Health endpoint free nahi hota Render pe — but called-ping keeps instance awake 24/7 within free limits)

@@ -856,6 +856,28 @@ JSON API, no HTML served). Live-proven: `x-content-type-options: nosniff`,
 full battery `tests/run.sh` (21 suites incl. new) **434/434 ALL GREEN**. Frontend untouched
 (build parity unchanged). No new npm runtime deps beyond `express-rate-limit` + `helmet`.
 
+## 🚀 Phase 11 Deployment Execution Prep (2026-08-26)
+
+Deployment files are now fully aligned with the 2026-08-26 security hardening:
+- `docs/DEPLOYMENT.md` — env table hardened (fresh 64-hex `JWT_SECRET` + strong unique
+  `ADMIN_SECRET` rules + generation commands, `CLIENT_URL` no-wildcard/exact-match note,
+  `RATE_LIMIT_DISABLED` = never-in-production warning, UptimeRobot-vs-rate-limit note) and a
+  new **§6 Post-Deploy Security Smoke** (one command, expected 9/9) + honest production gap:
+  **OTP SMS is not yet wired** (Twilio/Firebase TODO before real users; OTP currently prints
+  in server logs; Google Sign-In works without SMS once GOOGLE_CLIENT_ID is set).
+- NEW `backend/tests/prod-smoke.js` — post-deploy remote smoke: helmet headers, strict CORS
+  (unknown origin rejected / CLIENT_URL exact), rate limits ACTIVE (4th OTP send -> friendly
+  429), no OTP echo, google determinism, dev-route unreachability, clean 404s.
+  Usage: `API_URL=https://<render-url> CLIENT_URL=https://<vercel-url> node backend/tests/prod-smoke.js`
+  (deliberately NOT in the regression battery — it targets a deployed URL; 9/9 verified on a
+  local production-mode spawn).
+- Deploy order (unchanged from Phase 11 prep, now with security notes):
+  Atlas (MONGO_URI, 0.0.0.0/0) → Render backend (all env vars incl. fresh secrets +
+  `NODE_ENV=production`; `CLIENT_URL` initially placeholder OK) → Vercel frontend
+  (`VITE_API_URL`/`VITE_SOCKET_URL` = Render URL) → **back to Render: set real `CLIENT_URL`
+  = Vercel domain, redeploy** (strict CORS since 2026-08-26 will otherwise block the app)
+  → UptimeRobot 5-min ping `/api/health` → run prod-smoke (§6) → manual two-device journey.
+
 ## TODO Next
 - [x] All core features done + 5 bug fixes verified, site 100% functional end-to-end, ready for deployment prep
 - [x] Bidirectional Activity Sync & Workflow Completion pass - verified 48/48 E2E (2026-08-20)
@@ -875,6 +897,7 @@ full battery `tests/run.sh` (21 suites incl. new) **434/434 ALL GREEN**. Fronten
 - [x] Premature-offer bug FIXED (root cause: post auto-navigated to priced provider listing -> now lands on offers waiting screen; regression locked) + sound tones redesigned: 2 candidates each (general/new-request/booking), defaults pop/ascending-run/swoosh-chime, dev-only Sound Preview panel - 339/339 green (2026-08-23)
 - [x] Distance UX: one shared DistanceDisplay (pin + X.X km + ~N min, 18 km/h ETA assumption), live on provider cards/ActiveJob, accurate backend-computed SNAPSHOT on offer cards (privacy-safe), offers sort Newest/Nearest/Cheapest + provider nearest-first default + ⚡ Closest badge - 351/351 green (2026-08-23)
 - [x] Chat duplicate fix (optimistic temp + self-echo reconciliation via chatMerge helper, exactly-one both sides live incl. rapid sends) + CUSTOMER-ONLY ratings (403 CUSTOMER_ONLY_RATING, provider clean completion confirmation, new_rating provider-only) + new-request/booking tones replaced (knock + cha-ching defaults; notification tone untouched) - 362/362 green (2026-08-23)
+- [x] Phase 11 deploy-execution prep (DEPLOYMENT.md hardened to security baseline + prod-smoke.js 9/9 remote tool + secrets guidance) - push pending to deployer (2026-08-26)
 - [x] Security hardening pre-deployment (rate limits, dev-route 404s, CORS lockdown incl. real permissive-fallback hole fix, validation bounds, helmet, secrets checklist) - 434/434 green (2026-08-26)
 - [x] Work-location pinning (manual>gps priority, explicit unpin) + Leaflet/OSM map picker + GPS-mismatch banner + pre-acceptance privacy grid / exact post-accept (work-location.js 17/17) - 409/409 green (2026-08-24)
 - [x] Provider Home stats->Profile move + unprofessional-UI audit (DEV OTP gate, aria-labels, honest copy, rating format, PLACEHOLDER guard, long-text contracts) - 392/392 green (2026-08-24)
