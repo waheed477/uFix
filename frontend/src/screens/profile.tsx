@@ -207,8 +207,8 @@ export function ProfileTab() {
           </div>
           <div className="mt-3 space-y-2 text-sm">
             <div className="flex justify-between"><span className="text-ink-500">City:</span><span className="font-semibold text-ink-900">{displayCity}</span></div>
-            <div className="flex justify-between"><span className="text-ink-500">Map Center:</span><span className="text-xs font-medium text-ink-700">{location.city} · {location.address.substring(0,28)}...</span></div>
-            <div className="flex justify-between"><span className="text-ink-500">Mode:</span><span className="text-xs font-medium text-emerald-600">City-based (precise ignored)</span></div>
+            <div className="flex justify-between"><span className="text-ink-500">Area:</span><span className="text-xs font-medium text-ink-700 truncate max-w-[180px]">{location.address || location.city}</span></div>
+            <div className="flex justify-between"><span className="text-ink-500">Matching:</span><span className="text-xs font-medium text-emerald-600">Same city only</span></div>
             <p className="pt-2 text-[11px] leading-relaxed text-ink-400">
               {isProvider ? `You see requests only from ${displayCity}. Customer in ${displayCity} → you get LIVE.` : `You see online ${displayCity} providers only. Requests go to ${displayCity} pros.`}
             </p>
@@ -301,6 +301,10 @@ export function ProfileTab() {
 
 export function EditProfileScreen() {
   const { user, updateProfile, back, location } = useApp();
+  // Set-once phone (2026-08-26 Task 1): ONLY accounts with NO phone yet (legacy Google users)
+  // may set one here; everyone else gets the locked read-only display (see phone block below).
+  const hasPhone = !!(user?.phone && String(user.phone).trim());
+  const [phone, setPhone] = useState("");
   const [name, setName] = useState(user?.name ?? "");
   // Post-Audit Fix P4: city is now editable here (same Pakistan-cities vocabulary as onboarding)
   const [city, setCity] = useState(user?.city ?? location.city ?? "");
@@ -333,16 +337,34 @@ export function EditProfileScreen() {
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-ink-700">Phone number</label>
-            {/* Pre-Deploy Fix (Item 1): phone is the LOGIN IDENTITY. The backend deliberately
-                ignores it in PATCH /profile (a real change needs a fresh OTP to the NEW number -
-                out of scope). Previously this was an editable input whose value was silently
-                accepted-and-discarded (worse: it desynced local state from the backend until
-                reload). Now: honest read-only display, no dead-end editing. */}
-            <div className="flex h-14 w-full items-center justify-between rounded-2xl border-2 border-ink-100 bg-ink-50 px-4">
-              <span className="text-[15px] font-medium text-ink-600">{user?.phone ?? "—"}</span>
-              <span className="rounded-full bg-ink-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-ink-400">Login ID</span>
-            </div>
-            <p className="mt-1.5 text-[11px] text-ink-400">Phone number cannot be changed — it is used for login verification.</p>
+            {/* Pre-Deploy Fix (Item 1) + 2026-08-26 Task 1 "set-once, then locked":
+                phone-OTP users - phone IS the login identity, always read-only. GOOGLE users
+                with NO phone yet (account predates the mandatory-phone rule) get a SET-ONCE
+                input - the backend accepts phone ONLY while empty; afterwards locked forever
+                (403 PHONE_LOCKED) exactly like OTP users. */}
+            {hasPhone ? (
+              <>
+                <div className="flex h-14 w-full items-center justify-between rounded-2xl border-2 border-ink-100 bg-ink-50 px-4">
+                  <span className="text-[15px] font-medium text-ink-600">{user?.phone ?? "—"}</span>
+                  <span className="rounded-full bg-ink-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-ink-400">Login ID</span>
+                </div>
+                <p className="mt-1.5 text-[11px] text-ink-400">Phone number cannot be changed — it is used for login verification.</p>
+              </>
+            ) : (
+              <>
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="+923001234567"
+                  className="h-14 w-full rounded-2xl border-2 border-brand-200 bg-white px-4 text-[15px] font-medium text-ink-900 outline-none focus:border-brand-500"
+                />
+                <p className="mt-1.5 text-[11px] leading-relaxed text-amber-600">
+                  Job contact unlock ke liye phone zaroori hai. <strong>Ek dafa save hone ke baad ye lock ho jayega</strong> — sahi number likhein.
+                </p>
+              </>
+            )}
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-semibold text-ink-700">City</label>
@@ -376,7 +398,7 @@ export function EditProfileScreen() {
       </div>
 
       <div className="border-t border-ink-100 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button full size="lg" disabled={!name.trim() || !city.trim()} onClick={() => { updateProfile(name.trim(), city.trim()); back(); }}>
+        <Button full size="lg" disabled={!name.trim() || !city.trim() || (!hasPhone && phone.trim().replace(/\D/g, "").length < 10)} onClick={() => { updateProfile(name.trim(), city.trim(), hasPhone ? undefined : (phone.trim() || undefined)); back(); }}>
           Save changes
         </Button>
       </div>

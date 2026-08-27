@@ -76,9 +76,43 @@ const getOwnProfile = async (req, res) => {
  */
 const updateProfile = async (req, res) => {
   try {
-    const { name, city, profilePicture, isOnline } = req.body;
+    const { name, city, profilePicture, isOnline, phone } = req.body;
 
     const updates = {};
+
+    // Phone "set-once, then locked" (2026-08-26 Task 1): a phone number may ONLY be SET
+    // when the account currently has none - i.e. a Google-sign-in user whose account
+    // predates the mandatory-phone rule (their login identity is Google, not phone).
+    // Once set it locks FOREVER, identical to phone-OTP users (whose phone IS their login):
+    // changing an existing number is rejected regardless of auth method or role.
+    if (phone !== undefined) {
+      const me = await User.findById(req.user.id).select('phone');
+      if (me && me.phone && me.phone.trim().length > 0) {
+        return res.status(403).json({
+          status: 'error',
+          code: 'PHONE_LOCKED',
+          message: 'Phone number cannot be changed - it is used for login and job contact identity. Contact support if you need to update it.'
+        });
+      }
+      const cleaned = typeof phone === 'string' ? phone.trim() : '';
+      const phoneRegex = /^\+?[0-9\s\-()]{7,20}$/; // same rule as /auth/phone/send-otp
+      if (!phoneRegex.test(cleaned)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Phone number format is invalid. Example: +923001234567'
+        });
+      }
+      const conflict = await User.findOne({ phone: cleaned }).select('_id');
+      if (conflict) {
+        return res.status(409).json({
+          status: 'error',
+          code: 'PHONE_TAKEN',
+          message: 'This phone number is already linked to another account. Please use phone OTP to log into that account instead.'
+        });
+      }
+      updates.phone = cleaned;
+      updates.isPhoneVerified = false; // set via profile, not via OTP - honestly marked unverified
+    }
 
     if (name !== undefined) {
       if (typeof name !== 'string' || name.trim().length < 2) {

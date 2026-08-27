@@ -915,3 +915,35 @@ Deployment files are now fully aligned with the 2026-08-26 security hardening:
 - Free SVG map perfect, no Google verification needed, no charges, optional Google Maps via VITE_GOOGLE_MAPS_API_KEY with $200 free credit explanation
 - Profile loading optimized: instant cache + background fetch, no slow loading
 
+## Phase 12 — Google Phone Entry (set-once) + Profile Debug Cleanup (2026-08-27)
+
+**Contract: "SET-ONCE, THEN LOCKED" (user-directed).**
+- Phone is MANDATORY BY POLICY everywhere: OTP signup always sets one; Google signup 400s
+  (`needsPhone:true`) without one; Profile PATCH only ever SETS one, never changes one.
+- NEW in `userController.updateProfile`: `phone` accepted ONLY while the account has none
+  (legacy Google account predating the enforcement). Otherwise **403 PHONE_LOCKED**
+  regardless of auth method/role. Validation = same regex as `/auth/phone/send-otp`
+  (`/^\+?[0-9\s\-()]{7,20}$/`); conflict with another account → **409 PHONE_TAKEN**.
+  Set via profile ⇒ `isPhoneVerified=false` (honestly unverified — no OTP was done).
+- `User.js` schema: phone no longer `required` (legacy accounts must be persistable); match
+  validation still applies to any non-empty value; index changed to
+  `unique: true + partialFilterExpression { phone: { $type: 'string' } }` so multiple
+  phone-less legacy accounts can coexist. **Existing DBs: rebuild index once**
+  (`db.users.dropIndex('phone_1')` then restart) — fresh Atlas DBs need nothing.
+- Frontend `EditProfileScreen`: `hasPhone ? locked read-only ("Login ID") : set-once input`
+  (+amber "ek dafa save ke baad lock" note). Save button disabled until a plausible number
+  (≥10 digits) when phone missing. Store `updateProfile(name, city?, phone?)` — third arg
+  ONLY ever sent when `!user.phone` (`willSetPhone`); after a set, server truth is re-read
+  (`getProfile`) — the original Item-1 desync pattern stays impossible (pre-deploy suite
+  P1a/P1c evolved to encode this NEW invariant).
+- Profile cleanup: Sound Preview panel entry stays dev-only (`import.meta.env.DEV`) and is
+  dead-code-eliminated from production builds (live-grepped dist: zero "Sound Preview"/
+  "tone candidates"/"arpeggio"). Dev-speak removed: "Map Center"→"Area",
+  "City-based (precise ignored)"→"Same city only".
+- Google OAuth token verification remains env-limited in this sandbox (no GOOGLE_CLIENT_ID/
+  real idTokens) — documented per prior passes; entire set-once contract proven live with
+  minted access JWTs against seeded legacy users.
+- Tests: NEW suite `backend/tests/google-phone-profile.js` — 22/22 (S1-S9 statics incl.
+  untouched needsPhone enforcement + prod-bundle zero-trace with live build; L0-L7 live
+  set-once/lock/409/400/partial-index/control-user regression). `pre-deploy-checks.js`
+  evolved (5/5). Battery: **22 suites, 456/456 ALL GREEN.**

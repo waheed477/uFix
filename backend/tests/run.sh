@@ -25,6 +25,7 @@ TEST_SUITES=(
   tests/ui-polish-audit.js                 # UI polish pass: distance honesty cap, single-ETA, jargon-free UI, rating format, decline confirm, dead-end audit (2026-08-23)
   tests/work-location.js                    # Work-location pinning (manual>gps, explicit unpin) + GPS-mismatch banner + pre-acceptance privacy grid (2026-08-24)
   tests/security-hardening.js               # Security hardening: rate limits 429s, prod dev-route 404s, strict CORS, validation bounds, helmet (2026-08-26)
+  tests/google-phone-profile.js            # Phone set-once-then-locked (legacy Google repair) + Profile debug-cleanup (2026-08-27)
 )
 
 total_pass=0; total_fail=0; failed_suites=()

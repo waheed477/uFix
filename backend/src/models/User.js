@@ -25,8 +25,13 @@ const userSchema = new mongoose.Schema({
     type: String,
   },
   phone: {
+    // 2026-08-26 (Google phone-entry task): still MANDATORY BY POLICY - every write path
+    // enforces it (OTP signup always sets one; Google signup 400s with needsPhone without
+    // one; Profile PATCH only ever SETS one). The schema itself is relaxed so PRE-EXISTING
+    // Google accounts created before the mandatory rule can exist and be REPAIRED (set-once)
+    // instead of being a foreign-key-less dead record. Validation `match` still applies to
+    // any non-empty value.
     type: String,
-    required: [true, 'Phone number is mandatory for all users'],
     trim: true,
     // Basic E.164-ish validation - allow +92 format from frontend
     match: [/^\+?[0-9\s\-()]{7,20}$/, 'Please provide a valid phone number']
@@ -176,7 +181,10 @@ const userSchema = new mongoose.Schema({
 // Unique sparse for optional fields
 userSchema.index({ email: 1 }, { unique: true, sparse: true });
 userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
-userSchema.index({ phone: 1 }, { unique: true });
+// Partial-unique: only documents WITH a string phone are indexed (2026-08-26) - multiple
+// legacy phone-less Google accounts can coexist, while every real phone stays unique.
+// (On an existing DB this index must be rebuilt once: db.users.dropIndex('phone_1') then restart.)
+userSchema.index({ phone: 1 }, { unique: true, partialFilterExpression: { phone: { $type: 'string' } } });
 // Geospatial index for location queries - Phase 3
 // IMPORTANT: MongoDB GeoJSON order is [lng, lat] - NOT [lat, lng]
 userSchema.index({ location: '2dsphere' });

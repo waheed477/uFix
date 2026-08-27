@@ -5,9 +5,13 @@
  *   Backend PATCH /api/users/profile ignores phone BY DESIGN (login identity; a real
  *   change needs re-verification). The old UI accepted edits AND desynced local state
  *   (wrote the typed phone into user state + storedUser while the backend kept the
- *   old one). Now the field is read-only with an explanatory note, and updateProfile()
- *   has no phone parameter at all.
- *   P1a: no editable phone input remains in profile.tsx (no setPhone anywhere).
+ *   old one). The field is read-only for phone-OTP users.
+ *   2026-08-26 EVOLUTION (user-directed Task 1): the contract is now "set-once, then locked" -
+ *   a Google-sign-in account with NO phone may SET one once (backend enforces; 403 after),
+ *   OTP users stay locked as before. The assertions below encode the NEW invariant: the
+ *   editable input exists ONLY behind the no-phone gate, and a typed phone can NEVER reach
+ *   the API when the account already has one.
+ *   P1a: editable phone input exists ONLY in the !hasPhone branch; locked branch intact.
  *   P1b: the read-only note text is present.
  *   P2 : uploadProfilePicture is wired to UI (Item 2: tap-to-change photo on Profile).
  *   P3 LIVE: PATCH /users/profile {phone:X} -> GET /users/profile still shows the
@@ -42,17 +46,18 @@ async function api(p, { method = 'GET', token, body } = {}) {
   const ui = fs.readFileSync(path.join(SRC, 'components', 'ui.tsx'), 'utf8');
 
   assertTrue(
-    'P1a EditProfile has NO editable phone input (no setPhone anywhere in profile.tsx)',
-    !/setPhone/.test(profile)
+    'P1a phone input exists ONLY behind the no-phone gate (hasPhone ternary); locked branch kept',
+    profile.includes('hasPhone ? (') && profile.includes('only}') === false &&
+      profile.includes('hasPhone ? undefined : (phone.trim() || undefined)')
   );
   assertTrue(
     'P1b read-only phone note present ("cannot be changed ... used for login")',
     profile.includes('Phone number cannot be changed')
   );
   assertTrue(
-    'P1c updateProfile() no longer accepts a phone argument (type + call sites agree)',
-    store.includes('updateProfile: (name: string, city?: string) => void') &&
-      profile.includes('updateProfile(name.trim(), city.trim())')
+    'P1c store passes phone to API ONLY when account has none (willSetPhone = !user.phone)',
+    store.includes("const willSetPhone = !!phoneTrimmed && !(user as any)?.phone;") &&
+      store.includes('willSetPhone ? { phone: phoneTrimmed } : {}')
   );
   assertTrue(
     'P2 photo upload wired (Profile UI calls uploadProfilePicture; Avatar supports src w/ fallback)',

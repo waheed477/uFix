@@ -145,7 +145,7 @@ interface AppContextValue {
   // auth - real backend
   completeAuth: (role: Role, name: string, phone: string, city?: string) => void; // kept for compatibility, but now does real logic via login
   completeProviderSetup: (category: Category, radiusKm: number) => void;
-  updateProfile: (name: string, city?: string) => void;
+  updateProfile: (name: string, city?: string, phone?: string) => void; // phone: set-once only (account currently has none)
   uploadProfilePicture: (file: File) => Promise<string | null>;
   toggleOnline: () => void;
   logout: () => void;
@@ -1175,17 +1175,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const updateProfile = useCallback(async (name: string, city?: string) => {
+  const updateProfile = useCallback(async (name: string, city?: string, phone?: string) => {
     try {
       setLoading('profile', true);
       // Post-Audit Fix P4: city is editable now. Backend PATCH /api/users/profile accepts city.
-      // Pre-Deploy Fix (Item 1): the `phone` parameter is GONE. The backend PATCH ignores phone
-      // (login identity - changing it needs a full re-verification flow, out of scope), and the
-      // old code worse than ignored it: it wrote the typed phone into local state + storedUser,
-      // so the UI displayed a number the backend never saved - a true silent desync until reload.
+      // Pre-Deploy Fix (Item 1): phone is NORMALLY locked (login identity for OTP users).
+      // 2026-08-26 exception: `phone` is passed ONLY when the account has NO phone yet
+      // (legacy Google-sign-in account) - the backend enforces the set-once rule and always
+      // rejects changing an already-set number. We still read back the SERVER's user payload
+      // below so UI can never desync (the original Item-1 bug).
       const cityTrimmed = city?.trim();
       const willChangeCity = !!cityTrimmed && cityTrimmed !== user?.city;
-      await api.users.updateProfile(willChangeCity ? { name, city: cityTrimmed } : { name });
+      const phoneTrimmed = phone?.trim();
+      const willSetPhone = !!phoneTrimmed && !(user as any)?.phone;
+      await api.users.updateProfile({
+        name,
+        ...(willChangeCity ? { city: cityTrimmed } : {}),
+        ...(willSetPhone ? { phone: phoneTrimmed } : {}),
+      });
       setUser(prev => prev ? {
         ...prev,
         name,
@@ -1196,6 +1203,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const stored = getStoredUser();
       if (stored) {
         setStoredUser({ ...stored, name, ...(willChangeCity ? { city: cityTrimmed } : {}) });
+      }
+      if (willSetPhone) {
+        // Server truth after a phone set (locks forever afterwards): adopt returned phone.
+        try {
+          const fresh = await api.users.getProfile();
+          const p = fresh?.user?.phone;
+          if (p) {
+            setUser(prev => prev ? ({ ...prev, phone: p } as any) : prev);
+            const st2 = getStoredUser();
+            if (st2) setStoredUser({ ...st2, phone: p });
+          }
+        } catch { /* profile refresh is best-effort; UI already saved */ }
       }
 
       // City change => move the map + stored coordinates in ONE atomic location PATCH (P3 pattern),
