@@ -15,7 +15,7 @@ import {
   Avatar,
   BanknoteIcon,
   Button,
-  CategoryIcon,
+  CategoryIcon, ServiceNeededBadge,
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -419,7 +419,9 @@ export function OffersScreen() {
         </div>
         <div className="mt-3 rounded-2xl bg-ink-50 px-4 py-3">
           <p className="line-clamp-2 text-sm font-medium text-ink-700">“{request.description}”</p>
-          <div className="mt-1.5 flex items-center gap-1.5 text-xs text-ink-500"><MapPinIcon className="h-3.5 w-3.5" /> {request.address} · {location.city}<span className="text-ink-300">·</span><span className="font-semibold text-brand-700">{meta.label}</span></div>
+          <div className="mt-1.5 flex items-center gap-1.5 text-xs text-ink-500"><MapPinIcon className="h-3.5 w-3.5" /> {request.address} · {location.city}</div>
+          {/* clarity fix: service-type reads as REQUEST (was an inline specialty-colored word) */}
+          <div className="mt-1.5"><ServiceNeededBadge category={request.category} /></div>
         </div>
       </header>
       {(request.status === 'open' || (request as any)._originalStatus === 'pending') && (

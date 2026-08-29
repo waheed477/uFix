@@ -12,7 +12,7 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
-import { categoryById, type IncomingRequest, type SentOffer } from "@/lib/types";
+import { type IncomingRequest, type SentOffer } from "@/lib/types";
 import { NotificationBell } from "@/components/notifications";
 import { calculateDistanceKm, watchPosition, clearWatch, getCityCoords, type Coords } from "@/lib/location";
 import { playNewRequestTone } from "@/lib/sound";
@@ -20,7 +20,7 @@ import {
   Avatar,
   BriefcaseIcon,
   Button,
-  CategoryIcon,
+  CategoryIcon, ServiceNeededBadge,
   ChevronRightIcon,
   ClockIcon,
   CloseIcon,
@@ -74,7 +74,6 @@ function RequestCard({
   // whenever a poll remounted the list -> visible blinking on each 5s cycle.
   animateIn?: boolean;
 }) {
-  const meta = categoryById(req.category);
   const { user } = useApp();
   // Suggested price = provider's own defaultVisitingCharge from profile (falls back to a
   // category-based suggestion). The field stays fully editable - whatever number is in the
@@ -126,10 +125,10 @@ function RequestCard({
     <div className={cn(animateIn && "animate-slide-up", "rounded-2xl bg-white p-4 shadow-card border border-transparent hover:border-brand-200 transition-all")}>
       {/* Header: Customer + Time + Urgency */}
       <div className="flex items-start gap-3">
-        <div className="relative">
-          <Avatar initials={req.customerAvatar} color={req.customerColor} size={44} />
-          <CategoryIcon category={req.category} size={22} className="absolute -bottom-1 -right-1 rounded-lg ring-2 ring-white" />
-        </div>
+        {/* 2026-08-29 clarity fix: NO category icon glued to the customer's avatar - the
+            icon-on-person pattern means "this person's specialty". Category now lives on the
+            request itself (ServiceNeededBadge next to the description below). */}
+        <Avatar initials={req.customerAvatar} color={req.customerColor} size={44} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <span className="truncate font-display text-[15px] font-bold text-ink-900">{req.customerName}</span>
@@ -138,16 +137,17 @@ function RequestCard({
             </span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
-            <span className="shrink-0 font-semibold" style={{ color: meta.color }}>{meta.label}</span>
-            <span className="shrink-0 text-ink-300">·</span>
             <DistanceDisplay km={liveDistance} live />
             {isUrgent && <span className="ml-1 shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Expiring soon</span>}
           </div>
         </div>
       </div>
 
-      {/* Description */}
-      <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-ink-700">“{req.description}”</p>
+      {/* Request details: service-needed badge reads as REQUEST type, not the customer's role */}
+      <div className="mt-2.5 flex items-center gap-2">
+        <ServiceNeededBadge category={req.category} />
+      </div>
+      <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-ink-700">“{req.description}”</p>
 
       {/* Area / Jagah ka naam - Prominent */}
       <div className="mt-3 flex items-start gap-2 rounded-xl bg-brand-50/70 px-3 py-2.5 border border-brand-100">
@@ -208,7 +208,6 @@ const SENT_BADGE: Record<SentOffer["status"], { label: string; cls: string }> = 
 };
 
 function MyOfferCard({ offer, onOpenJob, onDismiss, onWithdraw, isWithdrawing }: { offer: SentOffer; onOpenJob: () => void; onDismiss: () => void; onWithdraw?: () => void; isWithdrawing?: boolean }) {
-  const meta = categoryById(offer.category);
   const badge = SENT_BADGE[offer.status];
   const isAccepted = offer.status === "accepted";
   const isPending = offer.status === "pending";
@@ -229,7 +228,8 @@ function MyOfferCard({ offer, onOpenJob, onDismiss, onWithdraw, isWithdrawing }:
         </p>
         <div className="mt-1.5 flex items-center gap-2">
           <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-bold", badge.cls)}>{badge.label}</span>
-          <span className="text-[10px] font-medium" style={{ color: meta.color }}>{meta.label}</span>
+          {/* clarity fix: neutral request-type label (was colored specialty word) */}
+          <ServiceNeededBadge category={offer.category} />
         </div>
       </div>
       {isAccepted ? (

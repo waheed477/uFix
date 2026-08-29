@@ -215,6 +215,32 @@ export function CategoryIcon({
     </span>
   );
 }
+// 2026-08-29 UI CLARITY FIX: "service needed" label. A PROVIDER's own specialty keeps the
+// colored tile + colored word (CategoryIcon gradient/soft - that pattern means "this person
+// IS an expert in X"). A CUSTOMER's REQUEST category must NEVER reuse that person-identity
+// language next to the customer's name (it read as "Ali is a Plumber"). This badge is the
+// request-type language: NEUTRAL outline pill + explicit verb phrase "Looking for: X",
+// placed with the request description/details - never attached to the customer's name/avatar.
+export function ServiceNeededBadge({
+  category,
+  className,
+}: {
+  category: Category;
+  className?: string;
+}) {
+  const meta = categoryById(category);
+  const Glyph = category === "plumber" ? WrenchIcon : category === "electrician" ? BoltIcon : CarIcon;
+  return (
+    <span
+      className={cn("inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-ink-50 px-2.5 py-1", className)}
+      title="Service type requested by the customer"
+    >
+      <Glyph className="h-3.5 w-3.5 shrink-0 text-brand-600" />
+      <span className="whitespace-nowrap text-[11px] font-semibold text-ink-600">Looking for: {meta.label}</span>
+    </span>
+  );
+}
+
 
 /* ============================================================
    AVATAR

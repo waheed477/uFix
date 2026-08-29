@@ -26,6 +26,7 @@ TEST_SUITES=(
   tests/work-location.js                    # Work-location pinning (manual>gps, explicit unpin) + GPS-mismatch banner + pre-acceptance privacy grid (2026-08-24)
   tests/security-hardening.js               # Security hardening: rate limits 429s, prod dev-route 404s, strict CORS, validation bounds, helmet (2026-08-26)
   tests/google-phone-profile.js            # Phone set-once-then-locked (legacy Google repair) + Profile debug-cleanup (2026-08-27)
+  tests/category-label-clarity.js           # Service-needed vs specialty labeling split + notification wording audit (2026-08-29)
 )
 
 total_pass=0; total_fail=0; failed_suites=()

@@ -947,3 +947,39 @@ Deployment files are now fully aligned with the 2026-08-26 security hardening:
   untouched needsPhone enforcement + prod-bundle zero-trace with live build; L0-L7 live
   set-once/lock/409/400/partial-index/control-user regression). `pre-deploy-checks.js`
   evolved (5/5). Battery: **22 suites, 456/456 ALL GREEN.**
+
+## Phase 13 — Category-Label Clarity: "service needed" vs "person's specialty" (2026-08-29)
+
+**Problem:** a customer's posted request carried its category in the PROVIDER-specialty
+visual language - `<CategoryIcon>` glued onto the customer's avatar and a meta.color word
+directly beside the customer name (`Ali · Plumber`). On provider screens this inverted the
+meaning: it read as "the customer IS a plumber".
+
+**Language split (both preserved, now visually distinct):**
+- PERSON SPECIALTY (unchanged): colored CategoryIcon tile (gradient/soft) + label —
+  only attaches to PROVIDERS: provider profile chips (`profile.tsx`), provider cards,
+  customer-side active-job header, rating screen `Plumber · completed` for providers.
+- REQUEST TYPE (new): shared `ServiceNeededBadge` in `ui.tsx` — NEUTRAL outline pill
+  (`border-ink-200 bg-ink-50`) + small neutral glyph + explicit verb phrase
+  **"Looking for: {label}"**. Never attaches to a person's name/avatar.
+
+**Applied at (before → after):**
+- Provider RequestCard (`provider.tsx`): avatar corner CategoryIcon overlay REMOVED;
+  under-name `meta.label` line REMOVED (distance + urgency kept); badge now sits ABOVE the
+  request description with the request details.
+- Provider MyOfferCard: colored `meta.label` word → `ServiceNeededBadge` (soft list tile kept).
+- Customer Offers-header: `· {meta.label}` removed from address tail; badge row added under
+  the description block (screen header decoration icon kept - no person name there).
+- Active-job peer header (`jobs.tsx`): role-conditional — `isCustomer` keeps provider
+  specialty chip + rating; provider-viewing-customer now sees `ServiceNeededBadge`.
+- Order-history JobCard: colored category word → `ServiceNeededBadge`.
+- Notifications: audited every backend `body:` template — all already read
+  "your {category} request" / "a {category} request" (request-type phrasing), so no change;
+  `request_new` bell entries were already discontinued in 2026-08.
+- Unchanged by design: rating screen peerRoleLine ("Plumber · completed" = provider
+  specialty — correct), direct-booking list header decoration icon.
+
+**Tests:** NEW suite `tests/category-label-clarity.js` — 16/16 (S1-S10 statics incl.
+untouched-specialty + notification-audit guarantees; L0-L3 live request/nearby flow intact;
+L4/L5 production bundle ships "Looking for:"). Battery: **23 suites, 472/472 ALL GREEN.**
+No backend/data change — display-layer only.

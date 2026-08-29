@@ -17,7 +17,7 @@ import {
   Avatar,
   BriefcaseIcon,
   Button,
-  CategoryIcon,
+  CategoryIcon, ServiceNeededBadge,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -204,8 +204,18 @@ export function ActiveJobScreen() {
                   <ShieldIcon className="h-4 w-4 shrink-0 text-brand-600" />
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-500">
-                  <CategoryIcon category={activeJob.category} size={18} className="rounded-md" soft />
-                  <span>{meta.label}</span>
+                  {/* clarity fix 2026-08-29: when the peer IS the provider, the colored chip
+                      correctly means "their specialty" (unchanged). When the peer is the
+                      CUSTOMER, show the request's service type with the neutral badge so it
+                      never reads as the customer's own profession. */}
+                  {isCustomer ? (
+                    <>
+                      <CategoryIcon category={activeJob.category} size={18} className="rounded-md" soft />
+                      <span>{meta.label}</span>
+                    </>
+                  ) : (
+                    <ServiceNeededBadge category={activeJob.category} />
+                  )}
                   {peerRating != null && <><span className="text-ink-300">·</span><Stars value={peerRating} size={13} /><span className="font-semibold text-ink-700">{peerRating.toFixed(1)}</span></>}
                 </div>
                 {liveDistance !== null && <p className="mt-1 text-xs"><DistanceDisplay km={liveDistance} live size={12} /></p>}
@@ -420,7 +430,6 @@ export function RatingScreen() {
 }
 
 function JobCard({ job, onOpen }: { job: Job; onOpen?: () => void }) {
-  const meta = categoryById(job.category);
   const isExpired = job.status === "cancelled" && job.cancelledReason === "expired";
   return (
     <button onClick={onOpen} className={cn("animate-slide-up flex w-full items-center gap-3 rounded-2xl bg-white p-3.5 text-left shadow-card", onOpen && "active:scale-[0.99]")}>
@@ -434,7 +443,7 @@ function JobCard({ job, onOpen }: { job: Job; onOpen?: () => void }) {
             : <StatusBadge status={job.status} className="shrink-0" />}
         </div>
         <p className="mt-1 flex items-center gap-1 text-xs text-ink-400"><MapPinIcon className="h-3 w-3 shrink-0" /><span className="truncate">{job.address}</span><span className="text-ink-300">·</span><span className="shrink-0">{timeAgo(job.createdAt)}</span></p>
-        <div className="mt-1.5 flex items-center gap-2"><span className="text-[11px] font-semibold" style={{ color: meta.color }}>{meta.label}</span>{job.rating && <span className="flex items-center gap-1"><Stars value={job.rating} size={12} /></span>}{job.fee && <span className="ml-auto text-xs font-bold text-emerald-600">{job.fee}</span>}</div>
+        <div className="mt-1.5 flex items-center gap-2"><ServiceNeededBadge category={job.category} />{job.rating && <span className="flex items-center gap-1"><Stars value={job.rating} size={12} /></span>}{job.fee && <span className="ml-auto text-xs font-bold text-emerald-600">{job.fee}</span>}</div>
       </div>
       {onOpen && <ChevronRightIcon className="h-5 w-5 shrink-0 text-ink-300" />}
     </button>
