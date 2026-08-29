@@ -32,3 +32,9 @@ pnpm-debug.log*
 
 # Delivery artifacts (never push zips)
 *.zip
+
+# Internal dev-notes (kept locally, excluded from repo)
+FINAL_LOCK.md
+frontend_context.md
+TESTING-GUIDE.md
+TESTING-WORK-LOCATION.md
