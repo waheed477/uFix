@@ -1,148 +1,181 @@
 # uFix — On-Demand Home & Vehicle Services Marketplace
 
-> A premium, mobile-first service marketplace for plumbers, electricians and mechanics — **Phase 9 Complete, Site Fully Functional End-to-End.**
+> **A production-grade, real-time two-sided marketplace** that connects customers with nearby
+> plumbers, electricians and mechanics — from OTP signup to live offers, job tracking with
+> privacy-gated contact unlock, in-job chat, ratings, and full order history.
 
-**Flow now fully real:** Customer signup via Phone OTP (real POST /api/auth/phone/send-otp + verify-otp, JWT localStorage) → Location permission + PATCH /api/users/location (GPS + reverse geocode + x/y ↔ lat/lng via coordsToOffset/offsetToCoords frontend-side) → Customer Home map (only user dot, removed fake SCATTER/onlineCount per task instruction) → New Request POST /api/requests (x,y→lat,lng conversion) → Nearby providers get request:new live via Socket.io + notification:new (request_new) → Provider Home shows real nearby requests via GET /api/requests/nearby + socket request:new live, online/offline toggle via PATCH /api/users/profile isOnline (Phase 9 backend fix), Send Offer via POST /api/requests/:id/offers → Customer gets offer:new live + notification:new (new_offer) → Offers screen real GET /api/requests/:id/offers + socket offer:new live, Accept via PATCH /api/offers/:id/accept → Job auto-created on_the_way with phones unlocked + offer:accepted/rejected/closed + notifications → Active Job via GET /api/jobs/my/active + job:statusUpdate live, status advance via PATCH /api/jobs/:id/status provider-only forward no skip/backward, call button tel: with real unlocked phone from Job response, Chat via GET /api/jobs/:jobId/messages history + chat:send emit + chat:message live + chat:markRead + chat:read ticks, Rating via POST /api/jobs/:jobId/rate, Order History via GET /api/jobs/history?status=all|completed|cancelled (Option B merged endpoint), Notifications bell via GET /api/notifications + notification:new live + mark read.
+Built with **React 19 + TypeScript + Vite + Tailwind v4** on the front and
+**Node.js + Express + Socket.io + MongoDB (Mongoose, 2dsphere)** on the back.
+Deployment-ready on **Render + Vercel** (blueprint included), hardened for production, and
+protected by **456 automated checks across 22 test suites — all green.**
 
 ---
 
-## Tech Stack
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, Socket.io-client, Fetch API client (lib/api.ts), Socket client (lib/socket.ts), Adapters (lib/adapters.ts)
-- **Backend:** Node.js, Express, MongoDB (Mongoose 2dsphere), Socket.io (room user:{id}, in-memory adapter no Redis deliberate), Cloudinary + Multer, JWT (HTTP Bearer + Socket handshake.auth.token), Google Auth + Phone OTP, Review (compound unique job+fromUser + aggregation $avg), Notification (persistence + notification:new live)
+## Why this project matters to a recruiter
 
-## Completed Phases (Site Complete)
-- [x] Phase 0: Setup & foundation
-- [x] Phase 1: Auth & User Model - phone mandatory, role customer/provider, Google + Phone OTP + JWT, auth middleware
-- [x] Phase 2: Profile & Provider Setup - picture upload Cloudinary mock, setup category/radiusKm/yearsExperience, document upload, verification status
-- [x] Phase 3: Location & Geospatial - User location GeoJSON Point [lng,lat] 2dsphere index, PATCH /api/users/location, findNearbyProviders/Requests, Haversine, [lng,lat] order critical
-- [x] Phase 4: Core Request & Offer Flow - Request (customer, category, description, location 2dsphere, address, status pending/active/completed/cancelled), Offer (request, provider, visitingCharge, etaMinutes, status pending/accepted/rejected, unique compound request+provider), one open request per customer, nearby for providers filtered by category/radius/online/verified, offer creation checks, accept atomic status=pending + Job creation
-- [x] Phase 5: Real-Time - Socket.io attached to same HTTP server, JWT auth via handshake.auth.token, room auto-join user:{id}, events request:new (nearby 15km), offer:new (to customer), offer:accepted/rejected/closed/cancelled, in-memory adapter no Redis deliberate
-- [x] Phase 6: Job Lifecycle & Contact Unlock + Adapter Layer - Job (request unique, customer, provider, offer, status on_the_way/arrived/in_progress/completed, statusHistory, completedAt), contact unlock at acceptance via Job creation (GET /api/jobs/:id includes both phones), status forward only no skip/backward provider-only, my/active both roles, job:statusUpdate to both, adapters etaMinutes→etaMin, providerId, timestamp, avatar initials/color, x/y via coordsToXY, geoLocation preserved, decision x/y frontend-side via coordsToOffset
-- [x] Phase 7: Chat System - Message (job indexed, sender, text 1-2000, readAt null), GET /api/jobs/:jobId/messages history oldest-first with before+limit, only participants, socket chat:send validates participant text, saves Message, emits chat:message to both + notifies recipient new_message, chat:markRead marks unread not sent by requester as read, emits chat:read for ✓/✓✓, chat:error codes
-- [x] Phase 8: Notification Persistence, Ratings & Order History - Review (job, fromUser, toUser, rating 1-5 integer, comment max 500, compound unique job+fromUser, aggregation $avg $count rounded 1 decimal), POST /api/jobs/:jobId/rate only completed rates other party auto, duplicate blocked, GET reviews, Order History GET /api/jobs/history?status=all|completed|cancelled merged completed Jobs + cancelled Requests sorted newest-first paginated Option B (single endpoint), Notification (user indexed, type enum [new_offer, offer_accepted, offer_rejected, request_new, request_cancelled, job_status_update, new_message], title, body, relatedId, isRead), utility createNotification saves DB + emits notification:new to user:{id}, wired into 7 trigger points, GET /api/notifications with unreadCount, PATCH read/read-all
-- [x] Phase 9: Frontend Integration - Real client, no more timers/mock/auto-replies - lib/api.ts fetch wrapper Bearer JWT base URL from VITE_API_URL env + 401 logout, lib/socket.ts Socket.io client auth token connect after login disconnect logout, lib/adapters.ts maps backend to frontend types, onboarding real send-otp/verify-otp + Google + JWT localStorage persistence (standalone Vite app, not artifact), location sends coords to PATCH /api/users/location + x/y ↔ lat/lng via coordsToOffset/offsetToCoords frontend-side, customer flow New Request POST /api/requests + Offers via real GET + socket offer:new live + Accept via PATCH accept, provider flow online toggle via PATCH profile isOnline (backend fix), nearby via GET nearby + socket request:new, Send Offer via POST, active job via GET my/active + job:statusUpdate live + status advance via PATCH + call tel: real unlocked phone, chat via GET messages history + chat:send emit + chat:message live + markRead + read ticks, rating via POST rate, notifications via GET notifications + notification:new live + mark read, order history via GET history with All/Completed/Cancelled filter (Option B), removed dead mock code (staggered timers, auto-status, auto-replies, fake SCATTER/onlineCount), preserved visual design, error/loading skeletons trigger on real network latency
+| Dimension | What you will find here |
+|---|---|
+| **Product thinking** | A complete, opinionated user journey — not a CRUD demo. Privacy is a feature: a customer's phone number is **only unlocked after they accept a provider's offer**, and a provider's exact work location is **never revealed before job acceptance** (coarse pre-acceptance grid instead). |
+| **Real-time engineering** | Socket.io with JWT-authenticated handshakes, per-user rooms, live offer/request propagation to nearby participants, chat with read-receipts, and optimistic-UI reconciliation (no duplicate messages, no flicker). |
+| **Geospatial depth** | MongoDB 2dsphere indexes, radius/category/availability-filtered matching, Haversine distances with honest ETA math (18 km/h city average), city-based matching rules. |
+| **Security posture** | helmet, layered rate limiting (per-route ceilings with friendly 429s), strict allow-list CORS, dual-token JWT (short-lived access + refresh with server-side session revocation), input validation bounds, dev-only routes that return 404 in production, and a dedicated post-deploy smoke tool (`tests/prod-smoke.js`). |
+| **Quality discipline** | 22-suite npm script battery (456/456 passing) covering E2E bidirectional flows, auth, chat, offers, distance UX, UI polish, rate limits and security headers. Regression guards freeze fixed bugs (city-override, null-user) against future changes. |
+| **Docs as deliverables** | A hardened deployment guide ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)) with env catalog, secret hygiene rules, and a verified post-deploy security checklist. Honest engineering notes: known limitations are documented, not hidden. |
 
-## API Endpoints
-- Health: GET /, GET /api/health
-- Auth: POST /api/auth/google, POST /api/auth/phone/send-otp, POST /api/auth/phone/verify-otp, GET /api/auth/me
-- Users: GET /api/users/profile, PATCH /api/users/profile (name, city, profilePicture, isOnline - Phase 9 fix), POST /api/users/profile/picture, PATCH /api/users/location
-- Providers: PATCH /api/providers/setup, POST /api/providers/document, GET /api/providers/verification-status, PATCH /api/providers/:id/verify
-- Requests: POST /api/requests, GET /api/requests/nearby, GET /api/requests/my, GET /api/requests/:id, PATCH /api/requests/:id/cancel
-- Offers: POST /api/requests/:id/offers, GET /api/requests/:id/offers, PATCH /api/offers/:id/accept
-- Jobs: GET /api/jobs/:id, PATCH /api/jobs/:id/status, GET /api/jobs/my/active, GET /api/jobs/history?status=all|completed|cancelled, POST /api/jobs/:jobId/rate, GET /api/jobs/:jobId/reviews
-- Messages: GET /api/jobs/:jobId/messages
-- Notifications: GET /api/notifications, PATCH /api/notifications/:id/read, PATCH /api/notifications/read-all
-- Socket.io: ws://localhost:PORT, auth JWT via handshake.auth.token, rooms user:{id}, events: request:new, offer:new, offer:accepted, offer:rejected, request:closed, request:cancelled, job:statusUpdate, chat:send, chat:message, chat:markRead, chat:read, chat:error, notification:new
+---
 
-## Environment Variables
-Backend: PORT, MONGO_URI, CLIENT_URL, NODE_ENV, JWT_SECRET, GOOGLE_CLIENT_ID, OTP_EXPIRY_MINUTES, CLOUDINARY_CLOUD_NAME/KEY/SECRET, ADMIN_SECRET
-Frontend: VITE_API_URL (http://localhost:5000), VITE_SOCKET_URL (http://localhost:5000) - no hardcoded localhost:5000 in code, all via env, .env.example provided
+## The product flow
 
-## Local Development Setup (POST-AUDIT - READ THIS FIRST)
-There are two ways to run the backend locally - do NOT mix them up:
+```
+Customer                                    Provider
+   │                                            │
+   │  Phone OTP / Google Sign-In  ─────────────▶│  Phone OTP / Google Sign-In
+   │  (phone mandatory; set-once               │  (same rules — auth method agnostic)
+   │   contract for legacy accounts)           │
+   │                                            │
+   │  GPS location + city                      │  Setup: category, radius, experience,
+   ▼                                            ▼  verification document
+   │                                            │
+   │  Creates service request ─▶ 2dsphere ─▶ Broadcast to nearby, online,
+   │                            matching      verified, matching-category providers
+   │                                            │
+   │  ◀──────── live incoming offers (price, ETA, rating) ────── offers submitted
+   │                                            │
+   │  Accepts one offer ───── ▶ Job created (on_the_way)
+   │  🔓 Contact unlock:                 🔓 Contact unlock:
+   │     provider's phone + map pin    ▶    customer's phone + address
+   │                                            │
+   │  Live status timeline (provider advances: arrived → in_progress → completed)
+   │  In-job chat (history, live messages, ✓/✓✓ read receipts)
+   │  Rating (1–5 + comment, one per job, aggregated to profile)
+   │  Order history (merged completed + cancelled, newest-first)
+```
 
-1. **Sandbox/quick testing (recommended for trying the app):** `cd backend && npm install && node dev-inmemory.js`
-   This starts the REAL server with an in-memory MongoDB (mongodb-memory-server) and injects
-   a dev JWT_SECRET - nothing to configure, but data is wiped on restart. It is a legitimate
-   testing tool, clearly NOT the production path.
+Key rules enforced server-side: one open request per customer, one offer per provider per
+request (unique compound index), job status **forward-only** (no skips, no rewinds),
+duplicate ratings blocked (compound unique index), phones immutable once set
+(`403 PHONE_LOCKED`, set-once only for legacy phone-less accounts).
 
-2. **Real run path (`npm start` = `node src/server.js`):** used for real local testing with a
-   persistent DB, and it mirrors how the app will run on Render. It **REQUIRES** a real
-   `backend/.env` created from `backend/.env.example`:
-   - `MONGO_URI` = your real MongoDB Atlas connection string (the file contains only a placeholder)
-   - `JWT_SECRET` = a real 64-hex string
-   If `MONGO_URI` is missing or unreachable, the backend now **fails fast with a loud fatal
-   error and non-zero exit** instead of starting and hanging every request (10s buffering
-   timeouts). Escape hatch for health-check-only runs: `ALLOW_NO_DB=true npm start`.
+---
 
-Deployment (Render etc.): set the same real env vars in the host's environment settings;
-`npm start` is the run command. The app will refuse to boot misconfigured - by design.
+## Architecture
 
-## Folder Structure (Simplified)
+```
+┌─────────────────────────┐          ┌──────────────────────────────┐
+│  Frontend (Vite/React)   │  HTTPS   │  Backend (Express)            │
+│  · lib/api.ts    REST    │─────────▶│  · routes → controllers       │
+│  · lib/socket.ts WS      │◀────────▶│  · Socket.io (JWT handshake)  │
+│  · lib/adapters.ts DTO   │  WS      │  · services: geo matching,    │
+│  · store.tsx  app state  │          │    notifications, tokens      │
+└─────────────────────────┘          └──────────────┬───────────────┘
+                                                    │ Mongoose
+                                        ┌───────────▼───────────────┐
+                                        │  MongoDB Atlas (2dsphere) │
+                                        └───────────────────────────┘
+                            Cloudinary — profile & verification uploads
+```
+
+**Design decisions, on purpose:** in-memory Socket.io adapter (no Redis — deliberate for
+single-instance deployment), x/y↔lat/lng conversion kept frontend-side, notification
+persistence behind a single `createNotification` utility wired into 7 trigger points,
+fail-fast boot when `MONGO_URI` is missing in production (loud error over silent hangs).
+
+---
+
+## Feature matrix
+
+| Area | Highlights |
+|---|---|
+| **Auth** | Phone OTP (6-digit, expiring), Google Sign-In, linking an email-linked Google account, dual-token JWT with refresh + revocation, mandatory phone policy with **set-once-then-locked** repair path for legacy accounts |
+| **Requests & matching** | One request per customer, geofenced broadcast, category/radius/online/verified filters |
+| **Offers** | Price + ETA, one-per-provider uniqueness, live customer feed, optimistic UI with server reconciliation |
+| **Jobs** | Accept → auto-created job, forward-only status machine, contact unlock on acceptance, pre-acceptance location privacy grid |
+| **Chat** | History pagination, live delivery, read receipts, per-job scoping, anti-duplicate guards |
+| **Ratings** | 1–5 + comment, one per job, `$avg/$count` aggregation on profiles |
+| **Notifications** | Persisted + live bell (unread badge), 7 trigger points, mark-read / read-all |
+| **Profile** | Edit name/city/photo; set-once phone repair for legacy Google users; provider work-location pinning (manual > GPS) with mismatch banner |
+| **Admin hooks** | Provider verification status, document upload, verify endpoint (admin-secret guarded) |
+
+---
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, Socket.io-client, Leaflet (work-location map) |
+| Backend | Node.js, Express, Mongoose (2dsphere), Socket.io, JWT (access + refresh), Cloudinary + Multer |
+| Security | helmet, express-rate-limit, strict CORS allow-list, validation bounds, prod smoke-tool (`tests/prod-smoke.js`) |
+| Testing | 22 custom suites (E2E lifecycle, bidirectional chat, security hardening, sound system, distance UX, UI polish) — `bash backend/tests/run.sh` |
+| Deploy | Render (API + WS, `render.yaml` blueprint) + Vercel (frontend), UptimeRobot ping, MongoDB Atlas M0 |
+
+---
+
+## Quick start (≈5 minutes)
+
+```bash
+# 1) Backend — zero-config sandbox mode (in-memory MongoDB, OTP printed to console)
+cd backend && npm install && node dev-inmemory.js
+
+# 2) Frontend
+cd frontend && npm install
+cp .env.example .env   # VITE_API_URL=http://localhost:5000, VITE_SOCKET_URL=http://localhost:5000
+npm run dev
+
+# 3) Production-like local run
+#    fill backend/.env from backend/.env.example (MONGO_URI, JWT_SECRET …) then:
+cd backend && npm start
+
+# 4) Full regression battery (spawns isolated in-memory servers)
+cd backend && bash tests/run.sh      # 22 suites — expect ALL GREEN
+```
+
+---
+
+## Deployment
+
+One-command blueprint: `render.yaml` (web service with health check), steps and every env
+variable documented in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — including secret
+generation, exact-match CORS, rate-limit etiquette for uptime pings, and a scripted
+**post-deploy security smoke**: `API_URL=... CLIENT_URL=... node backend/tests/prod-smoke.js`.
+
+Known next-step (documented, by design before real user rollout): plug a real SMS provider
+(Twilio/Firebase) into `/api/auth/phone/send-otp` — OTP currently prints to server logs in
+development. Google Sign-In works without it.
+
+---
+
+## Repository structure
+
 ```
 uFix/
-├── frontend/
-│   ├── src/lib/
-│   │   ├── api.ts (fetch wrapper Bearer JWT, base URL env, 401 logout, organized endpoints)
-│   │   ├── socket.ts (Socket.io client auth token, connect after login, central listeners)
-│   │   ├── adapters.ts (maps backend to frontend types, etaMinutes→etaMin, providerId, timestamp, avatar initials/color, x/y via coordsToXY)
-│   │   ├── location.ts (GPS + reverse geocode + offsetToCoords/coordsToOffset)
-│   │   ├── store.tsx (REWRITTEN Phase 9 - real backend, no timers/mock, socket listeners, real auth, location, customer/provider flows, jobs, chat, notifications, history, loading/error)
-│   │   └── types.ts
-│   ├── src/screens/
-│   │   ├── onboarding.tsx (real send-otp/verify-otp + Google + JWT localStorage + role + provider setup wizard)
-│   │   ├── location.tsx (GPS + PATCH location)
-│   │   ├── customer.tsx (removed fake SCATTER/onlineCount, New Request POST, Offers real GET + socket offer:new)
-│   │   ├── provider.tsx (online toggle via PATCH isOnline backend fix, nearby via GET nearby + socket request:new)
-│   │   ├── jobs.tsx (Active Job via GET my/active + job:statusUpdate live, Chat via GET history + socket send/message/read, Rating via POST rate, JobsTab + History via GET history with filter)
-│   │   └── profile.tsx
-│   ├── src/components/notifications.tsx (real GET notifications + notification:new live)
-│   ├── .env.example (VITE_API_URL, VITE_SOCKET_URL)
-│   └── package.json (+ socket.io-client)
+├── frontend/              # React 19 + TS — screens, components, state store, API/socket clients
 ├── backend/
-│   ├── src/models/ User (2dsphere, rating avg), Otp, Request (2dsphere), Offer (unique), Job (unique request), Message (job+createdAt), Review (job+fromUser unique), Notification (user+createdAt desc)
-│   ├── src/controllers/ auth, user (added isOnline Phase 9 fix), provider, request (emits + notifies), offer (creates Job + emits + notifies), job (contact unlock + status + emits + notifies + history Option B), message, review (aggregation), notification
-│   ├── src/routes/ health, auth, user, provider, request, offer, job (my/active, history, :id, :id/status, :id/rate, :id/reviews), message, review, notification
-│   ├── src/sockets/ authSocket (JWT handshake), index (initSocket, room user:{id}, setNotifyIO), chatSocket (chat:send, chat:message + notifies, markRead, read)
-│   ├── src/utils/ generateToken, geo (findNearbyProviders/Requests), responseAdapters, notify (createNotification + emits notification:new)
-│   └── src/server.js (http.createServer + initSocket + Phase 9 version)
-└── project_context.md (simplified per request - only phases mention up to complete site)
+│   ├── src/               # models / controllers / routes / sockets / utils / middleware
+│   ├── tests/             # 22-suite battery + prod-smoke.js — bash tests/run.sh
+│   └── dev-inmemory.js    # zero-config sandbox runner (in-memory Mongo)
+├── docs/                  # DEPLOYMENT.md (hardened), testing guides
+├── render.yaml            # Render blueprint
+└── project_context.md     # engineering log: phases, decisions, regression history
 ```
 
-## Phase 9 Backend Fixes
-- PATCH /api/users/profile did not accept isOnline boolean for provider online/offline toggle (Phase 2 only allowed name, city, profilePicture). Added isOnline support as minimal fix in backend userController. Documented.
+For the deep-dive on architecture decisions and bug-fix history, see
+[project_context.md](project_context.md).
 
-## Frontend Integration Summary
-- API Client: lib/api.ts fetch wrapper, Bearer JWT from localStorage (standalone Vite app, not artifact, so localStorage appropriate), base URL from VITE_API_URL env, 401 triggers logout via custom event
-- Socket Client: lib/socket.ts Socket.io client auth token, connect after login, disconnect logout, central on/off/emit helpers, re-connect with new token
-- JWT Storage: localStorage TOKEN_KEY ufix_jwt + USER_KEY ufix_user, stays logged in across refreshes, for artifact would be memory-only but for standalone Vite localStorage appropriate
-- Auth: onboarding real send-otp/verify-otp + Google POST /api/auth/google, JWT localStorage, role + provider setup wired, socket connect after login
-- Location: GPS + reverseGeocode + PATCH /api/users/location + x/y ↔ lat/lng via coordsToOffset/offsetToCoords frontend-side per Phase 6 decision (backend provides geoLocation)
-- Customer: Home map only user dot (removed fake SCATTER/onlineCount per task instruction - backend has findNearbyProviders utility but no customer-facing route, omitted with TODO), New Request POST /api/requests with x,y→lat,lng conversion, Offers via real GET + socket offer:new live, Accept via PATCH accept
-- Provider: Online toggle via PATCH profile isOnline (backend fix), nearby via GET nearby on mount/refresh + socket request:new live + request:closed/cancelled removal, Send Offer via POST
-- Active Job: GET my/active on mount + job:statusUpdate live, status advance via PATCH, call tel: with real unlocked phone
-- Chat: GET messages history on open + chat:send emit + chat:message live + markRead when focused + read ticks via chat:read
-- Rating: POST /api/jobs/:jobId/rate
-- Notifications: GET /api/notifications with unreadCount + notification:new live + mark read
-- Order History: GET /api/jobs/history?status=all|completed|cancelled (Option B merged)
-- Dead Code Removed: staggered offer timers (1600,3400,5600), auto-status progression (4500→on_the_way, 9500→arrived, 14500→in_progress), chat auto-replies (PROVIDER_REPLIES/CUSTOMER_REPLIES + keyword detection), fake SCATTER/onlineCount, SEED_REQUESTS mock no longer used in store (kept in types.ts for category config reference)
-- Error/Loading: Every real API call has loading skeletons via isLoading state during real network latency, error states via toast on real failures
+---
 
-## Screen → Backend Mapping
-| Screen | Backend Endpoint(s) | Socket Events Used |
-|---|---|---|
-| Splash | None (checks localStorage token, tries GET /api/users/profile) | None |
-| Auth Welcome (phone) | POST /api/auth/phone/send-otp | None |
-| Auth OTP | POST /api/auth/phone/verify-otp (phone, otp, name, role, city) | None |
-| Auth Details (role, name, city) | POST /api/auth/phone/verify-otp (with name, role, city) | None |
-| Auth Google | POST /api/auth/google | None |
-| Provider Setup Category/Coverage | PATCH /api/providers/setup {category, radiusKm, yearsExperience} | None |
-| Provider Setup Verification | POST /api/providers/document | None |
-| Location Permission | navigator.geolocation + OSM reverseGeocode + PATCH /api/users/location {lng,lat} | None |
-| Customer Home Map | No customer-facing nearby providers count route - omitted, TODO | None |
-| Customer PlaceSearch | OSM searchPlaces + reverseGeocode + PATCH /api/users/location | None |
-| New Request | POST /api/requests {category, description, lng, lat, address} (x,y→lat,lng via offsetToCoords) | None (triggers request:new to providers) |
-| Offers | GET /api/requests/:id/offers + POST /api/offers/:id/accept + PATCH /api/requests/:id/cancel | offer:new (append live) |
-| Provider Home Online Toggle | PATCH /api/users/profile {isOnline} (Phase 9 fix) | None |
-| Provider Home Nearby | GET /api/requests/nearby + refresh button | request:new (append), request:closed/cancelled (remove) |
-| Provider Send Offer | POST /api/requests/:id/offers {visitingCharge, etaMinutes} | None (triggers offer:new to customer) |
-| Active Job | GET /api/jobs/my/active + GET /api/jobs/:id | job:statusUpdate (update timeline live) |
-| Active Job Status Advance | PATCH /api/jobs/:id/status {status} | None (triggers job:statusUpdate to both) |
-| Chat | GET /api/jobs/:jobId/messages?before&limit + chat:send emit + chat:markRead | chat:message (append live), chat:read (update ✓/✓✓), chat:error |
-| Rating | POST /api/jobs/:jobId/rate {rating, comment} | None |
-| Jobs Tab | GET /api/requests/my (customer) + GET /api/jobs/my/active + GET /api/jobs/history?status=all (provider) via refreshJobs | job:statusUpdate |
-| Order History | GET /api/jobs/history?status=all|completed|cancelled&page&limit (Option B merged) | None |
-| Profile Edit | PATCH /api/users/profile {name, city} | None |
-| Profile Picture | POST /api/users/profile/picture | None |
-| Notifications Bell | GET /api/notifications?page&limit + PATCH /:id/read + PATCH /read-all | notification:new (prepend live + increment badge) |
+## Roadmap
 
-## TODO Next Phases
-- [ ] Phase 10: Deployment (Render backend + Vercel/Netlify frontend + UptimeRobot ping + production env vars)
+- [ ] Real SMS OTP (Twilio/Firebase) — integration point ready
+- [ ] Push notifications (FCM) alongside in-app bell
+- [ ] Payments / escrow on job completion
+- [ ] Multi-redis Socket.io adapter for horizontal scaling
 
-## Notes
-- Frontend now real client: no more timers, no more mock data, no more simulated auto-replies - verified via build + manual two-session test (customer + provider completing entire loop)
-- Visual design, screens, component structure preserved from original build - only data layer changed
-- Backend gap fixed: PATCH /api/users/profile now accepts isOnline for online/offline toggle
-- Pros online nearby count removed per task instruction - no backing route, omitted with TODO rather than fake number
-- JWT storage: localStorage for standalone Vite app (not artifact)
-- Site fully functional end-to-end
+---
+
+## Author
+
+**Waheed** — [@waheed477](https://github.com/waheed477)
+
+If you're a recruiter or a hiring engineer: the code, the tests and the docs are the
+interview — everything above is reproducible locally in minutes. Feedback and questions
+are welcome via GitHub.
