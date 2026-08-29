@@ -1,0 +1,42 @@
+# Netlify deployment config for the uFix FRONTEND (2026-08-29)
+#
+# The app lives in ./frontend and builds to a SINGLE index.html (vite-plugin-singlefile),
+# so this config is intentionally minimal and error-proof:
+#   - `base`    : run everything inside frontend/ (monorepo layout)
+#   - `command` : `npm install` runs implicitly; `vite build` is tsc-free so a TS warning
+#                 can never fail the deploy
+#   - `publish` : `dist` is RELATIVE to `base` -> frontend/dist
+#   - redirect  : SPA fallback so /offers/123 style paths don't 404 on refresh
+#
+# Set these two in Netlify UI (Site configuration -> Environment variables) BEFORE first
+# deploy (they are baked INTO the bundle at build time):
+#   VITE_API_URL    = https://<your-render-service>.onrender.com
+#   VITE_SOCKET_URL = https://<your-render-service>.onrender.com
+#
+# If you change Render's URL later: Netlify -> Delete deploy -> redeploy (env re-bake).
+
+[build]
+  base    = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Pin a stable Node so local (v20) and Netlify build identically.
+  NODE_VERSION = "20"
+  # Faster, quieter installs; build output unchanged.
+  NPM_FLAGS = "--no-audit --no-fund"
+  # Single-file SPA: no secrets in the bundle beyond the two VITE_* public URLs above.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_API_URL,VITE_SOCKET_URL"
+
+# SPA fallback — every client-side route serves the app shell.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+# Sensible defaults for a single-file SPA (no hashed asset URLs to cache forever).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

@@ -54,6 +54,27 @@ Secrets sirf Render/Vercel dashboards me paste karo — **kabhi git me commit na
 3. Client ID copy → Render `GOOGLE_CLIENT_ID` mein paste
 4. (Google Sign-In JavaScript client-side GETs an idToken; sirf yeh ID chahiye — secret ki zaroorat nahi)
 
+## 3b · Netlify (frontend — ALTERNATIVE to Vercel)
+
+One-click: **Add new site → Import from GitHub** (`waheed477/uFix`). Netlify reads
+`netlify.toml` from the repo root, so **nothing to configure in the UI except env vars:**
+build command / publish dir are taken from the file (`frontend/dist`, single-file bundle).
+
+**Required env vars (Site configuration → Environment variables) — set BEFORE deploy:**
+| Key | Value |
+|---|---|
+| `VITE_API_URL` | `https://<your-render-service>.onrender.com` |
+| `VITE_SOCKET_URL` | `https://<your-render-service>.onrender.com` |
+
+Notes:
+- Both values are **baked into the bundle at build time** — changing them later requires a
+  redeploy (Netlify: *Clear cache and deploy site*).
+- The SPA redirect (`/* → /index.html 200`) is already in `netlify.toml` — refreshes on
+  deeplinks never 404.
+- Node 20 is pinned in the file; Vite build is tsc-free so warnings can't fail the deploy.
+- After frontend is live, go back to Render and set `CLIENT_URL` to the Netlify domain
+  (exact origin, no path, no wildcard), trigger a Render redeploy, then run §6 smoke.
+
 ## 4 · Vercel (frontend)
 
 1. vercel.com → **Add New → Project** → repo import, **Root Directory = `frontend`**
